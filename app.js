@@ -47,7 +47,7 @@ const RISK_TAGS = new Set([
   'RECEIVABLES_RISK', 'INVENTORY_RISK', 'GROSS_MARGIN_DECLINE', 'MARGIN_DETERIORATION',
   'PROFITABILITY_PRESSURE', 'REVENUE_GROWTH_WEAK_CASH'
 ]);
-const STATE = { rows: [], headers: [], sourceName: 'submission_output.csv', scope: 'company', company: '', year: '', metrics: [] };
+const STATE = { rows: [], headers: [], sourceName: 'submission_output.csv', metrics: [], page: 'dashboard', filters: { dashboard: { company: 'all', year: 'all' }, analysis: { companies: 'all', year: 'all' }, comparison: { year: 'all' }, forecast: { company: 'all', year: 'all' }, alerts: { company: 'all', year: 'all' }, data: { company: 'all', year: 'all' } } };
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -67,13 +67,19 @@ const metricDisplay = (key, value) => {
   const metric = METRICS[key];
   return `${formatNumber(value, metric?.decimals ?? 1)}${metric?.unit === '%' ? '%' : metric?.unit ? ` ${metric.unit}` : ''}`;
 };
-const sortedYears = () => [...new Set(STATE.rows.map((row) => Number(row.fiscal_year)).filter(Number.isFinite))].sort((a, b) => a - b);
+const sortedYears = () => [...new Set(STATE.rows.map((row) => {
+  const raw = String(row.fiscal_year ?? '').trim();
+  const year = Number(raw);
+  return raw && Number.isInteger(year) && year > 0 ? year : null;
+}).filter((year) => year !== null))].sort((a, b) => a - b);
 const sortedCompanies = () => [...new Set(STATE.rows.map((row) => String(row.company_id ?? '').trim()).filter(Boolean))].sort();
 const rowFor = (company, year) => STATE.rows.find((row) => row.company_id === company && Number(row.fiscal_year) === Number(year)) || null;
 const latestRow = (company, yearLimit = Infinity) => STATE.rows
   .filter((row) => row.company_id === company && Number(row.fiscal_year) <= Number(yearLimit))
   .sort((a, b) => Number(b.fiscal_year) - Number(a.fiscal_year))[0] || null;
 const rowsAtYear = (year) => STATE.rows.filter((row) => Number(row.fiscal_year) === Number(year));
+const inScope = (row, filters) => (!filters.company || filters.company === 'all' || row.company_id === filters.company) && (!filters.year || filters.year === 'all' || Number(row.fiscal_year) === Number(filters.year));
+const scopedRows = (filters) => STATE.rows.filter((row) => inScope(row, filters));
 const median = (values) => {
   const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
   if (!sorted.length) return null;
@@ -148,8 +154,11 @@ async function loadCsv(file) {
     const companies = sortedCompanies();
     const years = sortedYears();
     if (!companies.length || !years.length) throw new Error('Không có mã doanh nghiệp hoặc năm tài chính hợp lệ trong CSV.');
-    STATE.company = companies.includes(STATE.company) ? STATE.company : companies[0];
-    STATE.year = years.includes(Number(STATE.year)) ? Number(STATE.year) : years[years.length - 1];
+    Object.values(STATE.filters).forEach((filter) => {
+      if ('company' in filter && filter.company !== 'all' && !companies.includes(filter.company)) filter.company = 'all';
+      if ('year' in filter && filter.year !== 'all' && !years.includes(Number(filter.year))) filter.year = 'all';
+    });
+    if (Array.isArray(STATE.filters.analysis.companies)) STATE.filters.analysis.companies = STATE.filters.analysis.companies.filter((company) => companies.includes(company));
     $('#loadError').classList.add('hidden');
     $('#appContent').classList.remove('hidden');
     $('#sidebarStatus').textContent = `${STATE.rows.length} bản ghi đã nạp`;
@@ -177,9 +186,8 @@ function populateSelect(select, items, selected, labelFn = (item) => item) {
 function configureSelectors() {
   const companies = sortedCompanies();
   const years = sortedYears();
-  populateSelect($('#companyFilter'), companies, STATE.company, (company) => company);
-  populateSelect($('#yearFilter'), years, STATE.year, (year) => `Năm ${year}`);
-  populateSelect($('#alertCompany'), ['all', ...companies], $('#alertCompany').value || 'all', (company) => company === 'all' ? 'Tất cả doanh nghiệp' : company);
+  [['dashboardCompany','dashboard'],['forecastCompany','forecast'],['alertCompany','alerts'],['dataCompany','data']].forEach(([id, key]) => populateSelect($(`#${id}`), ['all', ...companies], STATE.filters[key].company, (company) => company === 'all' ? 'Tất cả doanh nghiệp' : company));
+  [['dashboardYear','dashboard'],['analysisYear','analysis'],['comparisonYear','comparison'],['forecastYear','forecast'],['alertYear','alerts'],['dataYear','data']].forEach(([id, key]) => populateSelect($(`#${id}`), ['all', ...years], STATE.filters[key].year, (year) => year === 'all' ? 'Tất cả các năm' : `Năm ${year}`));
   const metricChoices = STATE.metrics.filter((key) => key !== 'risk_score');
   const options = metricChoices.map((key) => ({ key, label: METRICS[key].label }));
   ['analysisMetric', 'comparisonMetric', 'forecastMetric'].forEach((selector, index) => {
@@ -197,10 +205,38 @@ function configureSelectors() {
     }));
     if (!options.some((option) => option.key === element.value)) element.value = options[0]?.key || '';
   });
-  const analysisYears = ['all', ...years];
-  populateSelect($('#analysisYear'), analysisYears, $('#analysisYear').value || 'all', (year) => year === 'all' ? 'Tất cả kỳ' : `Đến năm ${year}`);
+  const analysisCompanies = $('#analysisCompanies');
+  const previousCompanies = STATE.filters.analysis.companies;
+  analysisCompanies.innerHTML = `<label class="company-option"><input type="checkbox" value="all" ${previousCompanies === 'all' ? 'checked' : ''}>Tất cả doanh nghiệp</label>${companies.map((company) => `<label class="company-option"><input type="checkbox" value="${escapeHtml(company)}" ${previousCompanies === 'all' || previousCompanies.includes(company) ? 'checked' : ''}>${escapeHtml(company)}</label>`).join('')}`;
+  $('#analysisCompanySummary').textContent = previousCompanies === 'all' ? 'Tất cả doanh nghiệp' : previousCompanies.length === 1 ? previousCompanies[0] : `${previousCompanies.length} doanh nghiệp đã chọn`;
   const alertTags = [...new Set(STATE.rows.flatMap((row) => riskTagsFor(row)))].sort();
   populateSelect($('#alertTag'), ['all', ...alertTags], $('#alertTag').value || 'all', (tag) => tag === 'all' ? 'Tất cả nhãn' : (TAG_LABELS[tag] || tag));
+  renderChatSuggestions();
+}
+
+function renderChatSuggestions() {
+  const groups = [
+    ['Tổng quan', ['Hãy đánh giá tổng quan tình hình tài chính của doanh nghiệp.', 'Những chỉ tiêu nào đang có biến động đáng chú ý?', 'Doanh nghiệp cần theo dõi những rủi ro tài chính nào?']],
+    ['Doanh thu và lợi nhuận', ['Doanh thu và lợi nhuận đã thay đổi như thế nào qua các năm?', 'Biên lợi nhuận có xu hướng cải thiện hay suy giảm?', 'Hãy chỉ ra các năm có biến động lợi nhuận đáng chú ý.']],
+    ['Dòng tiền, tài sản và nợ', ['Dòng tiền hoạt động có ổn định không?', 'Tình hình nợ và khả năng thanh toán thay đổi như thế nào?', 'Công nợ phải thu và hàng tồn kho có diễn biến gì?']],
+    ['So sánh doanh nghiệp', ['Doanh nghiệp nào có biên lợi nhuận cao nhất trong nhóm dữ liệu?', 'Hãy so sánh doanh thu và lợi nhuận giữa các doanh nghiệp.', 'Doanh nghiệp nào có diễn biến tài chính đáng chú ý nhất?']],
+    ['Cảnh báo và dự báo', ['Giải thích những cảnh báo rủi ro quan trọng nhất.', 'Những chỉ tiêu nào có nguy cơ suy giảm trong các năm tới?', 'Hãy giải thích kết quả dự báo tài chính hiện tại.']]
+  ];
+  const available = (key) => STATE.metrics.includes(key);
+  $('#chatSuggestions').innerHTML = groups.map(([title, questions]) => {
+    const filtered = questions.filter((question) => {
+      if (/doanh thu/.test(question)) return available('revenue_growth_pct');
+      if (/biên lợi nhuận/.test(question)) return available('gross_margin_pct') || available('operating_margin_pct') || available('net_margin_pct');
+      if (/dòng tiền hoạt động/.test(question)) return available('cfo_margin_pct') || available('cfo_to_net_income_x');
+      if (/nợ và khả năng thanh toán/.test(question)) return available('debt_to_assets_pct') || available('current_ratio_x');
+      if (/phải thu/.test(question)) return available('dso_days');
+      if (/tồn kho/.test(question)) return available('inventory_days');
+      if (/cảnh báo|rủi ro/.test(question)) return STATE.rows.some((row) => riskTagsFor(row).length);
+      if (/dự báo|suy giảm/.test(question)) return STATE.metrics.some((key) => !['risk_score'].includes(key));
+      return true;
+    });
+    return filtered.length ? `<div class="suggestion-group"><strong>${escapeHtml(title)}</strong>${filtered.map((question) => `<button type="button">${escapeHtml(question)}</button>`).join('')}</div>` : '';
+  }).join('');
 }
 
 function lineChart(series, unit, labels = {}) {
@@ -238,8 +274,17 @@ function lineChart(series, unit, labels = {}) {
   series.forEach((item, index) => {
     const color = item.color || palette[index % palette.length];
     const ordered = [...item.points].sort((a, b) => a.x - b.x);
-    const path = ordered.map((point, pointIndex) => `${pointIndex ? 'L' : 'M'} ${xAt(point.x).toFixed(1)} ${yAt(point.value).toFixed(1)}`).join(' ');
-    if (ordered.length > 1) markup += `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" ${item.dashed ? 'stroke-dasharray="5 4"' : ''}/>`;
+    let segment = [];
+    const drawSegment = () => {
+      if (segment.length < 2) return;
+      const path = segment.map((point, pointIndex) => `${pointIndex ? 'L' : 'M'} ${xAt(point.x).toFixed(1)} ${yAt(point.value).toFixed(1)}`).join(' ');
+      markup += `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" ${item.dashed ? 'stroke-dasharray="5 4"' : ''}/>`;
+    };
+    ordered.forEach((point) => {
+      if (segment.length && point.x - segment[segment.length - 1].x > 1) { drawSegment(); segment = []; }
+      segment.push(point);
+    });
+    drawSegment();
     ordered.forEach((point) => {
       markup += `<circle cx="${xAt(point.x)}" cy="${yAt(point.value)}" r="3.8" fill="${item.hollow ? '#fff' : color}" stroke="${color}" stroke-width="2"><title>${escapeHtml(point.label || `${point.x}: ${metricDisplay(item.metric, point.value)}`)}</title></circle>`;
     });
@@ -254,7 +299,7 @@ function lineChart(series, unit, labels = {}) {
 function barChart(items, unit) {
   const valid = items.filter((item) => Number.isFinite(item.value));
   if (!valid.length) return '<div class="chart-empty">Chưa có dữ liệu phù hợp trong cùng kỳ để so sánh.</div>';
-  const width = 560;
+  const width = Math.max(560, valid.length * 54 + 65);
   const height = 205;
   const left = 45;
   const right = 20;
@@ -266,7 +311,7 @@ function barChart(items, unit) {
   const baseline = top + (height - top - bottom) * (valid.some((item) => item.value < 0) ? maximum / (maximum + minimumMagnitude) : 1);
   const scale = (height - top - bottom) / (maxAbs * (valid.some((item) => item.value < 0) ? 2 : 1));
   const slot = (width - left - right) / valid.length;
-  let markup = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Biểu đồ cột so sánh cùng kỳ">`;
+  let markup = `<div class="chart-scroll"><svg style="width:${width}px;max-width:none" viewBox="0 0 ${width} ${height}" role="img" aria-label="Company comparison chart">`;
   markup += `<line x1="${left}" y1="${baseline}" x2="${width - right}" y2="${baseline}" stroke="#dfe7ea"/>`;
   valid.forEach((item, index) => {
     const x = left + slot * index + slot * 0.26;
@@ -274,11 +319,11 @@ function barChart(items, unit) {
     const barHeight = Math.abs(item.value) * scale;
     const y = item.value >= 0 ? baseline - barHeight : baseline;
     const color = item.color || (index === 0 ? '#10988d' : '#91a9b5');
-    markup += `<rect x="${x}" y="${y}" width="${barWidth}" height="${Math.max(barHeight, 1)}" rx="4" fill="${color}"><title>${escapeHtml(item.label)}: ${escapeHtml(metricDisplay(item.metric, item.value))}</title></rect>`;
+    markup += `<rect x="${x}" y="${y}" width="${barWidth}" height="${Math.max(barHeight, 1)}" rx="4" fill="${color}"><title>${escapeHtml(item.tooltip || item.label)}: ${escapeHtml(metricDisplay(item.metric, item.value))}</title></rect>`;
     markup += `<text x="${x + barWidth / 2}" y="${item.value >= 0 ? Math.max(y - 7, 10) : y + barHeight + 13}" text-anchor="middle" fill="#647680" font-size="9">${escapeHtml(formatNumber(item.value, 1))}</text>`;
     markup += `<text x="${x + barWidth / 2}" y="${height - 12}" text-anchor="middle" fill="#778791" font-size="9">${escapeHtml(item.label)}</text>`;
   });
-  markup += '</svg>';
+  markup += '</svg></div>';
   return markup;
 }
 
@@ -300,55 +345,59 @@ function changeMarkup(current, previous, metricKey) {
   return `<span class="kpi-change ${positive ? 'change-positive' : 'change-negative'}">${difference > 0 ? '+' : ''}${escapeHtml(formatNumber(difference, decimals))}${escapeHtml(unit)}</span>`;
 }
 
-function currentMetricValue(metric, selectedRow) {
-  if (STATE.scope === 'company') return getNumber(selectedRow, metric);
-  return median(rowsAtYear(STATE.year).map((row) => getNumber(row, metric)).filter((value) => value !== null));
-}
-
 function renderDashboard() {
-  const selectedRow = rowFor(STATE.company, STATE.year);
-  const priorRow = rowFor(STATE.company, Number(STATE.year) - 1);
-  const currentLabel = `${STATE.company} · năm ${STATE.year}`;
-  const groupRows = rowsAtYear(STATE.year);
+  const filters = STATE.filters.dashboard;
+  const visibleRows = scopedRows(filters);
+  const years = sortedYears().filter((year) => filters.year === 'all' || year === Number(filters.year));
+  const latestYear = years[years.length - 1];
+  const currentRows = visibleRows.filter((row) => Number(row.fiscal_year) === latestYear);
+  const companyRows = filters.company === 'all'
+    ? sortedCompanies().map((company) => filters.year === 'all' ? latestRow(company, latestYear) : rowFor(company, latestYear)).filter(Boolean)
+    : [filters.year === 'all' ? latestRow(filters.company, latestYear) : rowFor(filters.company, latestYear)].filter(Boolean);
+  const selectedRow = companyRows.length === 1 ? companyRows[0] : null;
+  const priorRow = selectedRow ? rowFor(selectedRow.company_id, Number(selectedRow.fiscal_year) - 1) : null;
+  const currentLabel = filters.company === 'all' ? `Tất cả doanh nghiệp · ${latestYear ?? 'không có kỳ'}` : `${filters.company} · năm ${latestYear ?? 'không có kỳ'}`;
+  const groupRows = currentRows;
   const kpis = [];
   kpis.push(kpiCard('Tổng doanh thu', 'Chưa có dữ liệu phù hợp', 'CSV chỉ có tốc độ tăng trưởng', '₫', true));
   kpis.push(kpiCard('Lợi nhuận sau thuế', 'Chưa có dữ liệu phù hợp', 'Không có số tiền lợi nhuận', '₫', true));
   ['net_margin_pct', 'debt_to_assets_pct', 'cfo_to_net_income_x'].forEach((key) => {
     if (!STATE.metrics.includes(key)) return;
-    const value = currentMetricValue(key, selectedRow);
+    const values = companyRows.map((row) => getNumber(row, key)).filter((value) => value !== null);
+    const value = selectedRow ? getNumber(selectedRow, key) : median(values);
     let change = '';
-    if (STATE.scope === 'company') change = changeMarkup(value, getNumber(priorRow, key), key);
-    const label = STATE.scope === 'company' ? currentLabel : `Trung vị năm ${STATE.year}`;
+    if (selectedRow) change = changeMarkup(value, getNumber(priorRow, key), key);
+    const label = selectedRow ? currentLabel : `Trung vị ${companyRows.length} doanh nghiệp · ${latestYear ?? '—'}`;
     kpis.push(kpiCard(METRICS[key].label, metricDisplay(key, value), label, METRICS[key].icon, value === null, change));
   });
   kpis.push(kpiCard('Tổng tài sản', 'Chưa có dữ liệu phù hợp', 'Không có trường tài sản', '▤', true));
   kpis.push(kpiCard('Tổng nợ / nợ vay', 'Chưa có dữ liệu phù hợp', 'Chỉ có tỷ lệ nợ / tài sản', '⇄', true));
   kpis.push(kpiCard('CFO tuyệt đối', 'Chưa có dữ liệu phù hợp', 'Có biên CFO và tỷ lệ CFO / LNST', '⌁', true));
   if (STATE.metrics.includes('free_cash_flow_vnd_mn')) {
-    const value = currentMetricValue('free_cash_flow_vnd_mn', selectedRow);
-    const change = STATE.scope === 'company' ? changeMarkup(value, getNumber(priorRow, 'free_cash_flow_vnd_mn'), 'free_cash_flow_vnd_mn') : '';
-    kpis.push(kpiCard('Dòng tiền tự do (FCF)', metricDisplay('free_cash_flow_vnd_mn', value), STATE.scope === 'company' ? currentLabel : `Trung vị năm ${STATE.year}`, '₫', value === null, change));
+    const values = companyRows.map((row) => getNumber(row, 'free_cash_flow_vnd_mn')).filter((value) => value !== null);
+    const value = selectedRow ? getNumber(selectedRow, 'free_cash_flow_vnd_mn') : median(values);
+    const change = selectedRow ? changeMarkup(value, getNumber(priorRow, 'free_cash_flow_vnd_mn'), 'free_cash_flow_vnd_mn') : '';
+    kpis.push(kpiCard('Dòng tiền tự do (FCF)', metricDisplay('free_cash_flow_vnd_mn', value), selectedRow ? currentLabel : `Trung vị ${companyRows.length} doanh nghiệp · ${latestYear ?? '—'}`, '₫', value === null, change));
   }
-  const flaggedCount = (STATE.scope === 'company' ? (selectedRow ? [selectedRow] : []) : groupRows)
+  const flaggedCount = (selectedRow ? [selectedRow] : groupRows)
     .filter((row) => riskTagsFor(row).length && ['HIGH', 'CRITICAL', 'MEDIUM'].includes(row.predicted_severity)).length;
-  kpis.push(kpiCard('Cảnh báo rủi ro', String(flaggedCount), STATE.scope === 'company' ? `${currentLabel} · mức từ trung bình (CSV)` : `Dữ liệu năm ${STATE.year} · mức từ trung bình (CSV)`, '!', false));
-  kpis.push(kpiCard('Doanh nghiệp có dữ liệu', STATE.scope === 'company' ? (selectedRow ? '1' : '0') : String(new Set(groupRows.map((row) => row.company_id)).size), `Trên ${groupRows.length} bản ghi năm ${STATE.year}`, '▦', false));
+  kpis.push(kpiCard('Cảnh báo rủi ro', String(flaggedCount), `${currentLabel} · mức từ trung bình (CSV)`, '!', false));
+  kpis.push(kpiCard('Doanh nghiệp có dữ liệu', String(new Set(groupRows.map((row) => row.company_id)).size), `Trên ${groupRows.length} bản ghi tại kỳ ${latestYear ?? '—'}`, '▦', false));
   $('#kpiGrid').innerHTML = kpis.join('');
-  $('#scopeNote').textContent = STATE.scope === 'company'
-    ? `Phạm vi: ${currentLabel}. Chỉ số thay đổi chỉ hiển thị khi có dữ liệu ở kỳ liền trước; không có dữ liệu được coi là 0.`
-    : `Phạm vi: trung vị các doanh nghiệp có giá trị tại năm ${STATE.year} (tối đa ${groupRows.length} bản ghi). Không cộng gộp tỷ lệ; các trường tuyệt đối không có trong CSV vẫn không khả dụng.`;
-  const years = sortedYears().filter((year) => year <= Number(STATE.year));
+  $('#scopeNote').textContent = `Phạm vi Dashboard: ${filters.company === 'all' ? 'tất cả doanh nghiệp' : filters.company} · ${filters.year === 'all' ? 'tất cả các năm' : `năm ${filters.year}`}. Biểu đồ tỷ lệ dùng trung vị theo kỳ; dữ liệu thiếu không được coi là 0.`;
   const series = ['gross_margin_pct', 'operating_margin_pct', 'net_margin_pct'].filter((key) => STATE.metrics.includes(key)).map((key, index) => ({
-    metric: key,
-    name: METRICS[key].label,
-    color: ['#168f86', '#6f91a6', '#d19543'][index],
-    points: years.map((year) => ({ x: year, value: getNumber(rowFor(STATE.company, year), key), label: `${STATE.company} · ${year}: ${metricDisplay(key, getNumber(rowFor(STATE.company, year), key))}` })).filter((point) => point.value !== null)
+    metric: key, name: METRICS[key].label, color: ['#168f86', '#6f91a6', '#d19543'][index],
+    points: years.map((year) => {
+      const rows = STATE.rows.filter((row) => (filters.company === 'all' || row.company_id === filters.company) && Number(row.fiscal_year) === year);
+      const value = filters.company === 'all' ? median(rows.map((row) => getNumber(row, key)).filter((v) => v !== null)) : getNumber(rowFor(filters.company, year), key);
+      return { x: year, value, label: `${filters.company === 'all' ? 'Trung vị các doanh nghiệp' : filters.company} · ${year}: ${metricDisplay(key, value)}` };
+    }).filter((point) => point.value !== null)
   }));
-  $('#dashboardChart').innerHTML = lineChart(series, '%', { aria: `Biên lợi nhuận ${STATE.company}` });
+  $('#dashboardChart').innerHTML = lineChart(series, '%', { aria: `Biên lợi nhuận · ${filters.company}` });
   const row = selectedRow;
   const riskTags = riskTagsFor(row);
   const summary = [
-    `<div class="insight-item"><span class="insight-bullet">✓</span><span><strong>${escapeHtml(currentLabel)}</strong><br>${row ? `Mức phân loại nguồn: ${escapeHtml(severityLabel(row.predicted_severity))}; điểm rủi ro ${escapeHtml(metricDisplay('risk_score', getNumber(row, 'risk_score')))}.` : 'Không có bản ghi cho kỳ đang chọn.'}</span></div>`,
+    `<div class="insight-item"><span class="insight-bullet">✓</span><span><strong>${escapeHtml(currentLabel)}</strong><br>${row ? `Mức phân loại nguồn: ${escapeHtml(severityLabel(row.predicted_severity))}; điểm rủi ro ${escapeHtml(metricDisplay('risk_score', getNumber(row, 'risk_score')))}.` : filters.company === 'all' ? `${currentRows.length} bản ghi trong kỳ; các tỷ lệ được trình bày bằng trung vị, không cộng gộp.` : 'Không có bản ghi cho kỳ đang chọn.'}</span></div>`,
     `<div class="insight-item"><span class="insight-bullet">↗</span><span><strong>Chỉ tiêu có thể phân tích</strong><br>${STATE.metrics.length} trường số được nhận diện; thiếu giá trị được giữ trống, không quy về 0.</span></div>`,
     `<div class="insight-item"><span class="insight-bullet">!</span><span><strong>Nhãn rủi ro do tệp cung cấp</strong><br>${riskTags.length ? riskTags.map((tag) => escapeHtml(TAG_LABELS[tag] || tag)).join(', ') : 'Không có nhãn rủi ro trong bản ghi được chọn.'}</span></div>`,
     `<div class="insight-item"><span class="insight-bullet">i</span><span><strong>Thiếu trường cơ bản</strong><br>Không có tên doanh nghiệp, ngành, doanh thu tuyệt đối hoặc báo cáo tài chính gốc.</span></div>`
@@ -358,38 +407,36 @@ function renderDashboard() {
 
 function renderAnalysis() {
   const metric = $('#analysisMetric').value;
-  const endYear = $('#analysisYear').value === 'all' ? Number(STATE.year) : Number($('#analysisYear').value);
-  const years = sortedYears().filter((year) => year <= endYear);
-  const points = years.map((year) => {
-    const row = rowFor(STATE.company, year);
-    return { x: year, value: getNumber(row, metric), label: `${STATE.company} · ${year}: ${metricDisplay(metric, getNumber(row, metric))}` };
-  }).filter((point) => point.value !== null);
-  $('#analysisChartTitle').textContent = `${METRICS[metric]?.label || 'Chỉ tiêu'} · ${STATE.company}`;
+  const filters = STATE.filters.analysis;
+  const years = sortedYears().filter((year) => filters.year === 'all' || year === Number(filters.year));
+  const companies = filters.companies === 'all' ? sortedCompanies() : filters.companies;
+  const palette = ['#108f86','#527f9b','#d28a39','#8067aa','#c45f69','#4e9b64','#ba6c37','#4582b7','#9b8b37','#bb568e','#4a9b9b','#777f8a'];
+  const series = companies.map((company, index) => ({ metric, name: company, color: palette[index % palette.length], points: years.map((year) => {
+    const row = rowFor(company, year); const value = getNumber(row, metric);
+    return { x: year, value, label: `${company} · ${year}: ${metricDisplay(metric, value)}` };
+  }).filter((point) => point.value !== null) })).filter((item) => item.points.length);
+  const omitted = companies.length - series.length;
+  $('#analysisChartTitle').textContent = `${METRICS[metric]?.label || 'Chỉ tiêu'} · ${series.length} doanh nghiệp có dữ liệu`;
   $('#analysisUnit').textContent = METRICS[metric]?.unit || '';
-  $('#analysisChart').innerHTML = lineChart([{ metric, name: METRICS[metric]?.label, points }], METRICS[metric]?.unit, { aria: `Xu hướng ${METRICS[metric]?.label || metric}` });
-  const omitted = years.length - points.length;
-  $('#analysisSource').textContent = `Nguồn: ${STATE.sourceName} · cột ${metric} · mã ${STATE.company}. ${points.length} kỳ có giá trị${omitted ? `; ${omitted} kỳ thiếu dữ liệu đã loại khỏi biểu đồ` : ''}. Đơn vị theo tên trường nguồn (${METRICS[metric]?.unit || 'chưa xác định'}).`;
+  $('#analysisChart').innerHTML = lineChart(series, METRICS[metric]?.unit, { aria: `Xu hướng ${METRICS[metric]?.label || metric}` });
+  $('#analysisSource').textContent = `Nguồn: ${STATE.sourceName} · cột ${metric}. ${years.length} năm trong phạm vi; ${omitted ? `${omitted} doanh nghiệp không có giá trị hợp lệ và đã được bỏ qua. ` : ''}Đơn vị: ${METRICS[metric]?.unit || 'chưa xác định'}.`;
 }
 
 function renderComparison() {
   const metric = $('#comparisonMetric').value;
-  const current = rowFor(STATE.company, STATE.year);
-  const values = rowsAtYear(STATE.year).map((row) => getNumber(row, metric)).filter((value) => value !== null);
-  const reference = median(values);
-  const companyValue = getNumber(current, metric);
-  const peers = values.length - (companyValue === null ? 0 : 1);
-  $('#comparisonNotice').textContent = `Không có trường ngành trong CSV. Mốc là trung vị trên ${values.length} doanh nghiệp có giá trị cùng kỳ ${STATE.year} (không phải nhóm cùng ngành); ${companyValue === null ? 'doanh nghiệp đang chọn thiếu chỉ tiêu này.' : `có ${peers} doanh nghiệp khác trong nhóm tham chiếu.`}`;
-  const items = [
-    { label: STATE.company, value: companyValue, color: '#10988d', metric },
-    { label: 'Trung vị dữ liệu', value: reference, color: '#94aab5', metric }
-  ];
+  const year = STATE.filters.comparison.year;
+  const companies = sortedCompanies();
+  const items = companies.map((company) => {
+    const row = year === 'all' ? latestRow(company) : rowFor(company, year);
+    return { label: company, tooltip: `${company} · năm ${row?.fiscal_year ?? '—'}`, value: getNumber(row, metric), metric };
+  }).filter((item) => item.value !== null);
+  $('#comparisonNotice').textContent = `Không có trường ngành trong CSV. So sánh các doanh nghiệp có dữ liệu${year === 'all' ? ' tại kỳ gần nhất có sẵn của từng doanh nghiệp' : ` trong năm ${year}`}; không đại diện nhóm cùng ngành.`;
   $('#comparisonChart').innerHTML = barChart(items, METRICS[metric]?.unit);
-  $('#comparisonCounts').textContent = `Đưa vào trung vị: ${values.length}/${rowsAtYear(STATE.year).length} bản ghi cùng kỳ có giá trị cho ${METRICS[metric]?.label}. Không sử dụng phép so sánh ngành.`;
+  $('#comparisonCounts').textContent = `${items.length} doanh nghiệp có giá trị cho ${METRICS[metric]?.label}. Đơn vị chung: ${METRICS[metric]?.unit}; khi chọn tất cả năm, mỗi doanh nghiệp dùng kỳ gần nhất của chính mình.`;
   const body = STATE.metrics.filter((key) => ['revenue_growth_pct', 'gross_margin_pct', 'operating_margin_pct', 'net_margin_pct', 'debt_to_assets_pct', 'cfo_margin_pct', 'cfo_to_net_income_x', 'free_cash_flow_vnd_mn', 'dso_days', 'inventory_days', 'interest_coverage_x'].includes(key))
     .map((key) => {
-      const selected = getNumber(current, key);
-      const groupValues = rowsAtYear(STATE.year).map((row) => getNumber(row, key)).filter((value) => value !== null);
-      return `<tr><td>${escapeHtml(METRICS[key].label)}</td><td>${escapeHtml(metricDisplay(key, selected))}</td><td>${escapeHtml(metricDisplay(key, median(groupValues)))}</td></tr>`;
+      const values = companies.map((company) => getNumber(year === 'all' ? latestRow(company) : rowFor(company, year), key)).filter((value) => value !== null);
+      return `<tr><td>${escapeHtml(METRICS[key].label)}</td><td>${escapeHtml(metricDisplay(key, median(values)))}</td><td>${values.length}</td></tr>`;
     }).join('');
   $('#comparisonTable').innerHTML = body || '<tr><td class="table-empty" colspan="3">Chưa có chỉ tiêu phù hợp để đối chiếu.</td></tr>';
 }
@@ -407,11 +454,20 @@ function linearFit(points) {
 
 function renderForecast() {
   const metric = $('#forecastMetric').value;
-  const years = sortedYears().filter((year) => year <= Number(STATE.year));
-  const points = years.map((year) => ({ x: year, value: getNumber(rowFor(STATE.company, year), metric) })).filter((point) => point.value !== null);
+  const filters = STATE.filters.forecast;
+  const company = filters.company;
+  if (company === 'all') {
+    $('#forecastTitle').textContent = `${METRICS[metric]?.label || 'Chỉ tiêu'} · chọn một doanh nghiệp`;
+    $('#forecastResult').innerHTML = '<strong>Dự báo cần một doanh nghiệp cụ thể.</strong> Hãy chọn doanh nghiệp trong bộ lọc của màn hình này.';
+    $('#forecastDetails').textContent = 'Không tạo dự báo tổng hợp từ chuỗi lịch sử của nhiều doanh nghiệp.';
+    $('#forecastChart').innerHTML = '<div class="chart-empty">Chọn một doanh nghiệp để xem chuỗi thực tế và kỳ dự báo.</div>';
+    return;
+  }
+  const years = sortedYears().filter((year) => filters.year === 'all' || year <= Number(filters.year));
+  const points = years.map((year) => ({ x: year, value: getNumber(rowFor(company, year), metric) })).filter((point) => point.value !== null);
   const consecutive = points.every((point, index) => index === 0 || point.x - points[index - 1].x === 1);
-  const nextYear = Number(STATE.year) + 1;
-  $('#forecastTitle').textContent = `${METRICS[metric]?.label || 'Chỉ tiêu'} · ${STATE.company}`;
+  const nextYear = Math.max(...points.map((point) => point.x)) + 1;
+  $('#forecastTitle').textContent = `${METRICS[metric]?.label || 'Chỉ tiêu'} · ${company}`;
   $('#forecastUnit').textContent = METRICS[metric]?.unit || '';
   if (points.length < 4 || !consecutive) {
     $('#forecastResult').innerHTML = `<strong>Chưa đủ điều kiện để dự đoán.</strong> Cần tối thiểu 4 kỳ liên tục có dữ liệu; hiện có ${points.length} kỳ hợp lệ${consecutive ? '' : ', chuỗi có khoảng trống'}.`;
@@ -436,8 +492,10 @@ function renderForecast() {
     metric, name: 'Ngoại suy tuyến tính', color: '#d19543', dashed: true,
     points: [{ ...last, label: `Thực tế ${last.x}: ${metricDisplay(metric, last.value)}` }, forecastPoints[forecastPoints.length - 1]]
   };
-  $('#forecastResult').innerHTML = `Ước tính cho năm ${nextYear}: <span class="forecast-number">${escapeHtml(metricDisplay(metric, predicted))}</span><br>Phương pháp: hồi quy tuyến tính bình phương tối thiểu trên ${points.length} kỳ liên tiếp.`;
-  $('#forecastDetails').textContent = `Kiểm tra giữ lại 1 kỳ: sai số tuyệt đối tại ${last.x} là ${holdoutError === null ? 'không tính được' : metricDisplay(metric, holdoutError)}. Ngoại suy giả định xu hướng tuyến tính tiếp tục; chỉ 1 kỳ kiểm tra không đủ để khẳng định độ chính xác. Nguồn lịch sử: ${STATE.sourceName}, cột ${metric}, ${STATE.company}.`;
+  const changePct = last.value === 0 ? null : ((predicted - last.value) / Math.abs(last.value)) * 100;
+  const direction = Math.abs(predicted - last.value) <= Math.max(Math.abs(last.value) * 0.01, 10 ** -(METRICS[metric]?.decimals ?? 1)) ? 'đi ngang tương đối' : predicted > last.value ? 'tăng' : 'giảm';
+  $('#forecastResult').innerHTML = `<strong>Nhận định dự báo · ${escapeHtml(company)} · ${escapeHtml(METRICS[metric]?.label || metric)} · năm ${nextYear}</strong><br>Xu hướng ngoại suy ${direction}. Năm ${nextYear}: <span class="forecast-number">${escapeHtml(metricDisplay(metric, predicted))}</span>${changePct === null ? ' (không tính phần trăm thay đổi vì kỳ gần nhất bằng 0).' : `; thay đổi ${changePct > 0 ? '+' : ''}${formatNumber(changePct, 1)}% so với năm ${last.x}.`} Phương pháp hồi quy tuyến tính trên ${points.length} kỳ thực tế.`;
+  $('#forecastDetails').textContent = `Kiểm tra giữ lại 1 kỳ: sai số tuyệt đối tại ${last.x} là ${holdoutError === null ? 'không tính được' : metricDisplay(metric, holdoutError)}. Ngoại suy giả định xu hướng tuyến tính tiếp tục; chỉ 1 kỳ kiểm tra không đủ để khẳng định độ chính xác. Giá trị sau năm ${last.x} là dự báo, không phải số liệu thực tế. Nguồn lịch sử: ${STATE.sourceName}, cột ${metric}, ${company}.`;
   $('#forecastChart').innerHTML = lineChart([actualSeries, forecastSeries], METRICS[metric]?.unit, { aria: 'Lịch sử và ước tính tuyến tính' });
 }
 
@@ -458,14 +516,14 @@ function renderAlerts() {
   const selectedTag = $('#alertTag').value || 'all';
   const selectedSeverity = $('#alertSeverity').value || 'all';
   const selectedCompany = $('#alertCompany').value || 'all';
-  const selectedYear = Number(STATE.year);
-  const flagged = STATE.rows.filter((row) => Number(row.fiscal_year) === selectedYear)
+  const selectedYear = STATE.filters.alerts.year;
+  const flagged = STATE.rows.filter((row) => (selectedYear === 'all' || Number(row.fiscal_year) === Number(selectedYear)) && (selectedCompany === 'all' || row.company_id === selectedCompany))
     .map((row) => ({ row, tags: riskTagsFor(row) }))
-    .filter(({ row, tags }) => tags.length && (selectedCompany === 'all' || row.company_id === selectedCompany) &&
+    .filter(({ row, tags }) => tags.length &&
       (selectedTag === 'all' || tags.includes(selectedTag)) &&
       (selectedSeverity === 'all' || (selectedSeverity === 'HIGH' ? ['HIGH', 'CRITICAL'].includes(row.predicted_severity) : row.predicted_severity === selectedSeverity)))
     .sort((a, b) => (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].indexOf(a.row.predicted_severity) - ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].indexOf(b.row.predicted_severity)) || (getNumber(b.row, 'risk_score') || 0) - (getNumber(a.row, 'risk_score') || 0));
-  $('#alertCount').textContent = `${flagged.length} bản ghi có nhãn rủi ro`;
+  $('#alertCount').textContent = `${flagged.length} bản ghi có nhãn rủi ro trong phạm vi`;
   if (!flagged.length) {
     $('#alertsList').innerHTML = '<div class="no-alerts">Không có bản ghi phù hợp với bộ lọc trong kỳ này. Điều này không đồng nghĩa doanh nghiệp không có rủi ro.</div>';
     return;
@@ -510,21 +568,23 @@ function fieldDescription(header) {
 function renderData() {
   const years = sortedYears();
   const companies = sortedCompanies();
-  const pairs = STATE.rows.map((row) => `${row.company_id}|${row.fiscal_year}`);
+  const filters = STATE.filters.data;
+  const filteredRows = scopedRows(filters);
+  const pairs = filteredRows.map((row) => `${row.company_id}|${row.fiscal_year}`);
   const duplicatePairs = pairs.length - new Set(pairs).size;
-  const missingColumns = STATE.headers.filter((header) => STATE.rows.some((row) => !String(row[header] ?? '').trim()));
-  const invalidYears = STATE.rows.filter((row) => !Number.isInteger(Number(row.fiscal_year))).length;
+  const missingColumns = STATE.headers.filter((header) => filteredRows.some((row) => !String(row[header] ?? '').trim()));
+  const invalidYears = filteredRows.filter((row) => !Number.isInteger(Number(row.fiscal_year))).length;
   const numericKeys = STATE.metrics;
   const dataStats = [
     ['Tệp đang sử dụng', STATE.sourceName],
-    ['Số bản ghi', String(STATE.rows.length)],
-    ['Doanh nghiệp', String(companies.length)],
-    ['Kỳ báo cáo', years.length ? `${years[0]}–${years[years.length - 1]}` : 'Chưa có']
+    ['Số bản ghi trong phạm vi', String(filteredRows.length)],
+    ['Doanh nghiệp trong phạm vi', String(new Set(filteredRows.map((row) => row.company_id)).size)],
+    ['Kỳ báo cáo trong phạm vi', filteredRows.length ? `${Math.min(...filteredRows.map((row) => Number(row.fiscal_year)))}–${Math.max(...filteredRows.map((row) => Number(row.fiscal_year)))}` : 'Chưa có']
   ];
   $('#dataOverview').innerHTML = dataStats.map(([label, value]) => `<div class="data-stat"><span>${escapeHtml(label)}</span><strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong></div>`).join('');
   $('#fieldCount').textContent = `${STATE.headers.length} trường`;
   $('#fieldTable').innerHTML = STATE.headers.map((header) => {
-    const values = STATE.rows.map((row) => String(row[header] ?? '').trim());
+    const values = filteredRows.map((row) => String(row[header] ?? '').trim());
     const present = values.filter(Boolean);
     const numeric = present.length > 0 && present.every((value) => Number.isFinite(Number(value)));
     const type = numeric ? 'Số' : 'Văn bản';
@@ -534,8 +594,8 @@ function renderData() {
     return `<tr><td><code>${escapeHtml(header)}</code></td><td>${type} · ${escapeHtml(unit)}</td><td>${dataStatus}</td><td>${escapeHtml(fieldDescription(header))}</td></tr>`;
   }).join('');
   const checks = [
-    { ok: true, text: `${STATE.rows.length} dòng hợp lệ được nạp, ${STATE.headers.length} cột được nhận diện.` },
-    { ok: true, text: `${companies.length} mã doanh nghiệp, ${years.length ? `${years[0]}–${years[years.length - 1]}` : 'không có'}; chưa có cột tên doanh nghiệp hoặc ngành.` },
+    { ok: true, text: `${filteredRows.length} dòng trong phạm vi bộ lọc, ${STATE.headers.length} cột được nhận diện.` },
+    { ok: true, text: `${new Set(filteredRows.map((row) => row.company_id)).size} mã doanh nghiệp trong phạm vi; tổng dữ liệu có ${companies.length} mã, ${years.length ? `${years[0]}–${years[years.length - 1]}` : 'không có'}; chưa có cột tên doanh nghiệp hoặc ngành.` },
     { ok: duplicatePairs === 0, text: duplicatePairs ? `Có ${duplicatePairs} khóa doanh nghiệp-năm bị trùng; lựa chọn kỳ có thể không duy nhất.` : 'Không có khóa company_id + fiscal_year bị trùng.' },
     { ok: missingColumns.length === 0, text: missingColumns.length ? `Có ô trống ở: ${missingColumns.join(', ')}. Ô trống không được coi là 0.` : 'Không phát hiện ô trống.' },
     { ok: invalidYears === 0, text: invalidYears ? `${invalidYears} dòng có năm tài chính không hợp lệ.` : 'Năm tài chính đọc được dưới dạng số.' },
@@ -557,50 +617,107 @@ function render() {
 
 function answerChat(question) {
   const text = question.toLocaleLowerCase('vi');
-  const row = rowFor(STATE.company, STATE.year);
-  const current = latestRow(STATE.company, STATE.year);
-  const riskTags = riskTagsFor(row);
-  if (/cảnh báo|rủi ro|alert/.test(text)) {
-    return row && riskTags.length
-      ? `${STATE.company} năm ${STATE.year}: CSV gắn nhãn ${riskTags.map((tag) => TAG_LABELS[tag] || tag).join(', ')}; mức độ nguồn là ${severityLabel(row.predicted_severity)}, điểm ${metricDisplay('risk_score', getNumber(row, 'risk_score'))}. Đây là phân loại có sẵn trong tệp, không phải kết luận gian lận.`
-      : `Không có nhãn rủi ro trong bản ghi ${STATE.company} năm ${STATE.year}. Việc không có nhãn không chứng minh doanh nghiệp không có rủi ro.`;
+  const requestedCompany = text.match(/\bc\s*0?(\d{1,3})\b/i);
+  const context = STATE.page === 'forecast' ? STATE.filters.forecast : STATE.page === 'analysis' ? STATE.filters.analysis : STATE.page === 'alerts' ? STATE.filters.alerts : STATE.page === 'comparison' ? STATE.filters.comparison : STATE.page === 'data' ? STATE.filters.data : STATE.filters.dashboard;
+  const activeCompany = context.company || (Array.isArray(context.companies) && context.companies.length === 1 ? context.companies[0] : 'all');
+  const company = requestedCompany ? `C${String(Number(requestedCompany[1])).padStart(3, '0')}` : activeCompany;
+  const yearMatch = text.match(/\b(20\d{2})\b/);
+  const endYear = yearMatch ? Number(yearMatch[1]) : context.year && context.year !== 'all' ? Number(context.year) : Infinity;
+  const dataRows = STATE.rows.filter((row) => (!requestedCompany && company === 'all' || row.company_id === company) && Number(row.fiscal_year) <= endYear).sort((a, b) => Number(a.fiscal_year) - Number(b.fiscal_year));
+  const scopedRows = dataRows;
+  const yearsLabel = scopedRows.length ? `${scopedRows[0].fiscal_year}–${scopedRows[scopedRows.length - 1].fiscal_year}` : `đến năm ${Number.isFinite(endYear) ? endYear : 'mới nhất'}`;
+  const trends = /qua các năm|xu hướng|thay đổi|diễn biến|biến động|cải thiện|suy giảm/.test(text);
+  const compare = /so sánh|doanh nghiệp nào|cao nhất|nhóm dữ liệu/.test(text);
+  const riskIntent = /cảnh báo|rủi ro|nguy cơ/.test(text);
+  const forecastIntent = /dự báo|dự đoán|năm tới|các năm tới/.test(text);
+  const metricAliases = [
+    ['revenue_growth_pct', /doanh thu|tăng trưởng/], ['gross_margin_pct', /biên lợi nhuận gộp|biên gộp/],
+    ['operating_margin_pct', /biên lợi nhuận hoạt động|biên hoạt động/], ['net_margin_pct', /biên lợi nhuận ròng|biên lợi nhuận(?! gộp| hoạt động)|lợi nhuận/],
+    ['cfo_to_net_income_x', /cfo\s*\/|cfo\s*và\s*lợi nhuận/], ['cfo_margin_pct', /dòng tiền hoạt động|\bcfo\b/],
+    ['free_cash_flow_vnd_mn', /dòng tiền tự do|\bfcf\b/], ['debt_to_assets_pct', /nợ.*tài sản|đòn bẩy/],
+    ['debt_to_equity_x', /nợ.*vốn chủ/], ['current_ratio_x', /thanh toán hiện hành|khả năng thanh toán/],
+    ['quick_ratio_x', /thanh toán nhanh/], ['dso_days', /phải thu|công nợ/], ['inventory_days', /tồn kho|hàng tồn/],
+    ['interest_coverage_x', /trả lãi|lãi vay/], ['risk_score', /điểm rủi ro/], ['roa_pct', /\broa\b/], ['roe_pct', /\broe\b/]
+  ];
+  const metric = metricAliases.find(([key, pattern]) => STATE.metrics.includes(key) && pattern.test(text))?.[0];
+  if (riskIntent) {
+    const flagged = scopedRows.filter((row) => riskTagsFor(row).length).map((row) => {
+      const tags = riskTagsFor(row);
+      const evidence = evidenceForAlert(row, tags).filter((item) => item.value !== null).map((item) => `${item.label}: ${metricDisplay(item.key, item.value)}`);
+      const sourceRule = String(row.evidence_fields || '').split(' || ').filter((entry) => tags.some((tag) => entry.startsWith(`${tag}:`))).map((entry) => entry.split('|').slice(-1)[0].trim()).filter(Boolean);
+      return `${row.company_id} năm ${row.fiscal_year}: ${tags.map((tag) => TAG_LABELS[tag] || tag).join(', ')}; mức ${severityLabel(row.predicted_severity)}, điểm ${metricDisplay('risk_score', getNumber(row, 'risk_score'))}${evidence.length ? `; số liệu kèm theo: ${evidence.join(', ')}` : ''}${sourceRule.length ? `; điều kiện được CSV mô tả: ${[...new Set(sourceRule)].join('; ')}` : ''}`;
+    }).slice(-8);
+    return flagged.length ? `Nhãn cảnh báo trong dữ liệu${company === 'all' ? '' : ` của ${company}`} (${yearsLabel}):\n${flagged.join('\n')}\nĐiều kiện và nhãn là thông tin do CSV cung cấp, chưa được xác minh từ báo cáo nguồn; không phải kết luận kiểm toán hay quan hệ nhân quả.` : `Không có nhãn rủi ro trong phạm vi dữ liệu${company === 'all' ? '' : ` của ${company}`} (${yearsLabel}). Điều này không chứng minh không có rủi ro.`;
   }
-  if (/so sánh|trung vị|ngành|benchmark/.test(text)) {
-    return `Không có trường ngành trong CSV nên không thể so sánh cùng ngành. Có thể tham khảo trung vị của toàn bộ bản ghi năm ${STATE.year}, nhưng đây không phải nhóm đối chứng ngành.`;
+  if (compare) {
+    const compareMetrics = [...new Set(metricAliases.filter(([key, pattern]) => STATE.metrics.includes(key) && pattern.test(text)).map(([key]) => key))];
+    if (!compareMetrics.length) return 'Bạn muốn so sánh chỉ tiêu nào (ví dụ biên lợi nhuận, tăng trưởng doanh thu hay nợ/tài sản)? CSV không có trường ngành nên chỉ có thể so sánh toàn bộ nhóm dữ liệu.';
+    const compareYear = Number.isFinite(endYear) ? endYear : Math.max(...sortedYears());
+    const comparisons = compareMetrics.map((key) => {
+      const ranked = sortedCompanies().map((id) => ({ id, value: getNumber(rowFor(id, compareYear), key) })).filter((item) => item.value !== null).sort((a, b) => b.value - a.value);
+      return ranked.length ? `${METRICS[key].label}: ${ranked.slice(0, 4).map((item) => `${item.id} ${metricDisplay(key, item.value)}`).join('; ')}${ranked.length > 4 ? `; … ${ranked.length} doanh nghiệp có dữ liệu` : ''}. Cao nhất: ${ranked[0].id}.` : `${METRICS[key].label}: không có giá trị hợp lệ.`;
+    });
+    return `So sánh năm ${compareYear}: ${comparisons.join(' ')} CSV không có trường ngành nên đây không phải so sánh cùng ngành. Chỉ tiêu tăng trưởng doanh thu và biên lợi nhuận không phải số tiền doanh thu/lợi nhuận.`;
   }
-  if (/công thức|tính như|formula/.test(text)) {
-    return 'Các trường tỷ lệ và công thức đã được cung cấp sẵn trong CSV; tệp này không có số liệu báo cáo gốc để tính lại. Ví dụ cfo_to_net_income_x là tỷ lệ CFO / lợi nhuận ròng theo tên trường, nhưng thiếu trường tiền CFO và lợi nhuận tuyệt đối để xác minh phép tính.';
+  if (forecastIntent) {
+    const forecastCompany = requestedCompany ? `C${String(Number(requestedCompany[1])).padStart(3, '0')}` : STATE.filters.forecast.company;
+    if (forecastCompany === 'all') return 'Chưa có doanh nghiệp được chọn trong màn hình Dự đoán tài chính. Chọn một doanh nghiệp rồi hỏi lại để truy vấn đúng chuỗi.';
+    const forecastEnd = STATE.filters.forecast.year === 'all' ? Infinity : Number(STATE.filters.forecast.year);
+    const forecastMetrics = /những chỉ tiêu|chỉ tiêu nào/.test(text) ? STATE.metrics.filter((key) => key !== 'risk_score') : [metric || $('#forecastMetric').value];
+    const estimates = forecastMetrics.map((forecastMetric) => {
+      const history = sortedYears().filter((year) => year <= forecastEnd).map((year) => ({ x: year, value: getNumber(rowFor(forecastCompany, year), forecastMetric) })).filter((point) => point.value !== null);
+      if (history.length < 4 || !history.every((point, index) => index === 0 || point.x - history[index - 1].x === 1)) return { metric: forecastMetric, unavailable: true };
+      const fit = linearFit(history); const lastPoint = history[history.length - 1]; const nextYear = lastPoint.x + 1; const prediction = fit?.predict(nextYear);
+      if (!Number.isFinite(prediction)) return { metric: forecastMetric, unavailable: true };
+      return { metric: forecastMetric, history, lastPoint, nextYear, prediction };
+    });
+    const available = estimates.filter((item) => !item.unavailable);
+    if (!available.length) return `Chưa đủ ít nhất 4 kỳ liên tiếp có dữ liệu phù hợp để ngoại suy cho ${forecastCompany}; chatbot không tạo số dự báo.`;
+    if (/những chỉ tiêu|chỉ tiêu nào/.test(text)) {
+      const declining = available.filter((item) => item.prediction < item.lastPoint.value);
+      const description = declining.length ? declining.map((item) => `${METRICS[item.metric].label}: ${metricDisplay(item.metric, item.lastPoint.value)} (${item.lastPoint.x}) → ${metricDisplay(item.metric, item.prediction)} (ngoại suy ${item.nextYear})`).join('; ') : 'Không có chỉ tiêu đủ dữ liệu mà ngoại suy cho thấy mức năm tới thấp hơn kỳ gần nhất.';
+      return `Ngoại suy tuyến tính của ${forecastCompany} cho thấy: ${description}. Đây chỉ là sàng lọc xu hướng, không phải xác suất rủi ro hay kết luận chắc chắn. ${available.length} chỉ tiêu đủ 4 kỳ liên tiếp; ${estimates.length - available.length} chỉ tiêu thiếu điều kiện.`;
+    }
+    const estimate = available[0];
+    const change = estimate.lastPoint.value === 0 ? null : (estimate.prediction - estimate.lastPoint.value) / Math.abs(estimate.lastPoint.value) * 100;
+    return `${METRICS[estimate.metric].label} của ${forecastCompany}: hồi quy tuyến tính trên ${estimate.history.length} kỳ liên tiếp ngoại suy năm ${estimate.nextYear} ở mức ${metricDisplay(estimate.metric, estimate.prediction)} (${estimate.prediction > estimate.lastPoint.value ? 'cao hơn' : estimate.prediction < estimate.lastPoint.value ? 'thấp hơn' : 'bằng'} năm ${estimate.lastPoint.x}${change === null ? '' : ` khoảng ${formatNumber(Math.abs(change), 1)}%`}). Đây là ngoại suy thử nghiệm, không phải kết quả chắc chắn; dữ liệu lịch sử kết thúc ở ${estimate.lastPoint.x}.`;
   }
-  if (/\bcfo\b|dòng tiền hoạt động/.test(text)) {
-    const value = getNumber(current, 'cfo_margin_pct');
-    const ratio = getNumber(current, 'cfo_to_net_income_x');
-    return value === null && ratio === null
-      ? `Không có số liệu CFO phù hợp cho ${STATE.company} ở kỳ gần nhất đến năm ${STATE.year}.`
-      : `Kỳ ${current.fiscal_year} của ${STATE.company}: biên CFO ${metricDisplay('cfo_margin_pct', value)}; CFO / lợi nhuận ròng ${metricDisplay('cfo_to_net_income_x', ratio)}. CSV không có số tiền CFO tuyệt đối để đối chiếu.`;
+  if (text.includes('ý nghĩa') || text.includes('là gì') || text.includes('giải thích')) {
+    if (metric) return `${METRICS[metric].label} (${METRICS[metric].unit}) là chỉ tiêu được cung cấp sẵn trong CSV. Giá trị hiển thị không được tính lại từ báo cáo gốc vì thư mục chỉ có bảng chỉ tiêu tổng hợp.`;
   }
-  if (/\broa\b/.test(text)) return metricAnswer('roa_pct', current);
-  if (/\broe\b/.test(text)) return metricAnswer('roe_pct', current);
-  const matchedMetric = STATE.metrics.find((key) => {
-    const words = METRICS[key].label.toLocaleLowerCase('vi').split(/\s+/).filter((word) => word.length > 3);
-    return words.some((word) => text.includes(word)) || text.includes(key.replace(/_/g, ' '));
-  });
-  if (matchedMetric) {
-    const value = getNumber(current, matchedMetric);
-    return value === null
-      ? `${METRICS[matchedMetric].label} của ${STATE.company} ở kỳ gần nhất có trong dữ liệu (năm ${current?.fiscal_year || STATE.year}) đang thiếu. Không thay giá trị thiếu bằng 0.`
-      : `${METRICS[matchedMetric].label} của ${STATE.company} năm ${current.fiscal_year}: ${metricDisplay(matchedMetric, value)}. Nguồn: ${STATE.sourceName}, cột ${matchedMetric}.`;
+  if (!metric && (/tổng quan|tình hình tài chính|chỉ tiêu nào|theo dõi/.test(text))) {
+    const targetRows = company === 'all' ? sortedCompanies().map((id) => latestRow(id, endYear)).filter(Boolean) : [latestRow(company, endYear)].filter(Boolean);
+    if (!targetRows.length) return `Không tìm thấy bản ghi trong dữ liệu ${yearsLabel}.`;
+    const latest = targetRows[0].fiscal_year;
+    const summaryKeys = ['revenue_growth_pct','operating_margin_pct','net_margin_pct','current_ratio_x','debt_to_assets_pct','cfo_margin_pct'];
+    const evidence = summaryKeys.filter((key) => STATE.metrics.includes(key)).map((key) => {
+      const values = targetRows.map((row) => getNumber(rowFor(row.company_id, latest), key)).filter((value) => value !== null);
+      return `${METRICS[key].label}: ${metricDisplay(key, values.length === 1 ? values[0] : median(values))}`;
+    });
+    const flaggedCount = targetRows.filter((row) => riskTagsFor(row).length && ['HIGH','CRITICAL','MEDIUM'].includes(row.predicted_severity)).length;
+    return `${company === 'all' ? `Tổng quan ${targetRows.length} doanh nghiệp` : `Tổng quan ${company}`} tại ${latest}${company === 'all' ? ' (các tỷ lệ dùng trung vị)' : ''}: ${evidence.join('; ')}. Có ${flaggedCount} bản ghi gắn nhãn rủi ro từ trung bình trở lên. Đây là mô tả dữ liệu, không xác định nguyên nhân.`;
   }
-  if (current) {
-    return `Mình có thể tra cứu chỉ tiêu trong CSV cho ${STATE.company} (kỳ gần nhất đến năm ${current.fiscal_year}). Hãy hỏi về biên lợi nhuận, nợ/tài sản, CFO, số ngày phải thu, hàng tồn kho hoặc nhãn cảnh báo. Đây là chatbot thử nghiệm theo quy tắc cục bộ, chưa kết nối AI thật.`;
+  if (metric) {
+    if (!scopedRows.length) return `Không tìm thấy bản ghi cho ${company === 'all' ? 'nhóm doanh nghiệp' : company} ${yearsLabel}.`;
+    const valid = scopedRows.map((row) => ({ year: Number(row.fiscal_year), value: getNumber(row, metric) })).filter((point) => point.value !== null);
+    if (!valid.length) return `Trường ${metric} có trong cấu trúc dữ liệu nhưng không có giá trị hợp lệ trong phạm vi ${yearsLabel}.`;
+    if (company === 'all' && !compare) {
+      const latestYear = Math.max(...valid.map((point) => point.year));
+      const values = STATE.rows.filter((row) => Number(row.fiscal_year) === latestYear).map((row) => getNumber(row, metric)).filter((value) => value !== null);
+      return `Trung vị ${METRICS[metric].label} của ${values.length} doanh nghiệp năm ${latestYear} là ${metricDisplay(metric, median(values))}. Phạm vi lịch sử có ${valid.length} giá trị hợp lệ; chọn một doanh nghiệp trong màn hình Dashboard để xem chuỗi riêng.`;
+    }
+    const latest = valid[valid.length - 1];
+    if (trends && valid.length > 1) {
+      const first = valid[0]; const delta = latest.value - first.value;
+      const direction = delta > 0 ? 'tăng' : delta < 0 ? 'giảm' : 'không đổi';
+      const changes = valid.slice(1).map((point, index) => ({ from: valid[index], to: point, amount: Math.abs(point.value - valid[index].value) })).sort((a, b) => b.amount - a.amount);
+      const sequence = valid.map((point) => `${point.year}: ${metricDisplay(metric, point.value)}`).join('; ');
+      const largest = changes[0];
+      return `${METRICS[metric].label} của ${company}, ${first.year}–${latest.year}: ${sequence}. Tổng thể ${direction} ${metricDisplay(metric, Math.abs(delta))}; biến động lớn nhất là ${largest.from.year}–${largest.to.year} (${metricDisplay(metric, largest.amount)}). Chuỗi có ${valid.length} kỳ hợp lệ; các khoảng thiếu bị bỏ trống. Diễn biến này không tự chứng minh nguyên nhân.`;
+    }
+    return `${METRICS[metric].label} của ${company}, năm ${latest.year}: ${metricDisplay(metric, latest.value)}. Nguồn: ${STATE.sourceName}, cột ${metric}.`;
   }
-  return `Chưa có dữ liệu cho ${STATE.company} đến năm ${STATE.year}. Hãy chọn doanh nghiệp hoặc kỳ có bản ghi.`;
-}
-
-function metricAnswer(metric, current) {
-  const value = getNumber(current, metric);
-  return value === null
-    ? `${METRICS[metric].label} của ${STATE.company} ở kỳ gần nhất có trong dữ liệu đang thiếu. Không thay giá trị thiếu bằng 0.`
-    : `${METRICS[metric].label} của ${STATE.company} năm ${current.fiscal_year}: ${metricDisplay(metric, value)}. Nguồn: ${STATE.sourceName}, cột ${metric}.`;
+  return `Mình có thể truy vấn ${STATE.metrics.length} chỉ tiêu số trong CSV. Hãy hỏi về doanh thu, biên lợi nhuận, dòng tiền, thanh khoản, nợ, phải thu, tồn kho hoặc cảnh báo. Trợ lý hiện chạy bằng quy tắc cục bộ, chưa kết nối mô hình AI.`;
 }
 
 function addChatMessage(text, type) {
@@ -620,20 +737,24 @@ function setChatOpen(open) {
 }
 
 function initInteractions() {
-  $('#companyFilter').addEventListener('change', (event) => { STATE.company = event.target.value; render(); });
-  $('#yearFilter').addEventListener('change', (event) => { STATE.year = Number(event.target.value); render(); });
+  [['dashboardCompany','dashboard','company',renderDashboard],['dashboardYear','dashboard','year',renderDashboard],['analysisYear','analysis','year',renderAnalysis],['comparisonYear','comparison','year',renderComparison],['forecastCompany','forecast','company',renderForecast],['forecastYear','forecast','year',renderForecast],['alertCompany','alerts','company',renderAlerts],['alertYear','alerts','year',renderAlerts],['dataCompany','data','company',renderData],['dataYear','data','year',renderData]].forEach(([id, screen, field, callback]) => $(`#${id}`).addEventListener('change', (event) => { STATE.filters[screen][field] = event.target.value; callback(); }));
   $('#analysisMetric').addEventListener('change', renderAnalysis);
   $('#analysisYear').addEventListener('change', renderAnalysis);
+  $('#analysisCompanies').addEventListener('change', (event) => {
+    const value = event.target.value;
+    const prior = STATE.filters.analysis.companies;
+    if (value === 'all') STATE.filters.analysis.companies = event.target.checked ? 'all' : [];
+    else {
+      const selected = prior === 'all' ? sortedCompanies() : [...prior];
+      const next = event.target.checked ? [...new Set([...selected, value])] : selected.filter((company) => company !== value);
+      STATE.filters.analysis.companies = next.length === sortedCompanies().length ? 'all' : next;
+    }
+    configureSelectors(); renderAnalysis();
+  });
   $('#comparisonMetric').addEventListener('change', renderComparison);
   $('#forecastMetric').addEventListener('change', renderForecast);
   $('#alertSeverity').addEventListener('change', renderAlerts);
   $('#alertTag').addEventListener('change', renderAlerts);
-  $('#alertCompany').addEventListener('change', renderAlerts);
-  document.querySelectorAll('.scope-button').forEach((button) => button.addEventListener('click', () => {
-    STATE.scope = button.dataset.scope;
-    document.querySelectorAll('.scope-button').forEach((item) => item.classList.toggle('active', item === button));
-    renderDashboard();
-  }));
   $('#reloadButton').addEventListener('click', () => loadCsv());
   $('#chatToggle').addEventListener('click', () => setChatOpen($('#chatWindow').classList.contains('hidden')));
   $('#chatClose').addEventListener('click', () => setChatOpen(false));
@@ -647,7 +768,8 @@ function initInteractions() {
     addChatMessage('Đang tra cứu dữ liệu…', 'system');
     const pending = $('#chatMessages').lastElementChild;
     window.setTimeout(() => {
-      pending.textContent = answerChat(question);
+      try { pending.textContent = answerChat(question); }
+      catch (error) { pending.textContent = `Không thể hoàn tất tra cứu: ${error.message || 'Lỗi xử lý dữ liệu.'} Hãy thử câu hỏi khác hoặc kiểm tra CSV.`; }
       $('#chatMessages').scrollTop = $('#chatMessages').scrollHeight;
     }, 220);
   });
@@ -671,25 +793,29 @@ function initInteractions() {
     $('#sidebar').classList.remove('open');
     $('#sidebarScrim').classList.remove('open');
   });
-  document.querySelectorAll('.nav-link').forEach((link) => link.addEventListener('click', () => {
-    document.querySelectorAll('.nav-link').forEach((item) => item.classList.toggle('active', item === link));
-    $('#currentSection').textContent = link.textContent.trim();
-    $('#sidebar').classList.remove('open');
-    $('#sidebarScrim').classList.remove('open');
+  const showPage = (page, updateHash = false) => {
+    const validPage = document.getElementById(page)?.classList.contains('page-section') ? page : 'dashboard';
+    STATE.page = validPage;
+    document.querySelectorAll('.page-section').forEach((section) => {
+      const active = section.id === validPage;
+      section.classList.toggle('active-page', active);
+      section.setAttribute('aria-hidden', String(!active));
+    });
+    document.querySelectorAll('.nav-link').forEach((link) => {
+      const active = link.hash === `#${validPage}`;
+      link.classList.toggle('active', active);
+      if (active) $('#currentSection').textContent = link.textContent.trim();
+    });
+    if (updateHash && location.hash !== `#${validPage}`) history.pushState(null, '', `#${validPage}`);
+    $('#sidebar').classList.remove('open'); $('#sidebarScrim').classList.remove('open');
+  };
+  document.querySelectorAll('.nav-link, .brand').forEach((link) => link.addEventListener('click', (event) => {
+    const page = link.hash.slice(1); if (!document.getElementById(page)) return;
+    event.preventDefault(); showPage(page, true);
   }));
-  const sections = [...document.querySelectorAll('.page-section')];
-  if ('IntersectionObserver' in window) {
-    const observer = new IntersectionObserver((entries) => {
-      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      if (!visible) return;
-      const active = document.querySelector(`.nav-link[href="#${visible.target.id}"]`);
-      if (active) {
-        document.querySelectorAll('.nav-link').forEach((item) => item.classList.toggle('active', item === active));
-        $('#currentSection').textContent = active.textContent.trim();
-      }
-    }, { rootMargin: '-15% 0px -70% 0px', threshold: [0, .1, .4] });
-    sections.forEach((section) => observer.observe(section));
-  }
+  window.addEventListener('hashchange', () => showPage(location.hash.slice(1)));
+  window.addEventListener('popstate', () => showPage(location.hash.slice(1)));
+  showPage(location.hash.slice(1) || 'dashboard');
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
   fileInput.accept = '.csv,text/csv';

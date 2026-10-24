@@ -31,6 +31,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, textarea:focus-visi
 .app-shell { min-height: 100vh; }
 .sidebar { width: 250px; position: fixed; inset: 0 auto 0 0; z-index: 20; display: flex; flex-direction: column; padding: 25px 15px 18px; background: var(--navy); color: #dbe7ed; }
 .brand { display: flex; gap: 11px; align-items: center; padding: 2px 8px 34px; color: white; text-decoration: none; }
+.brand-logo { width: 40px; height: 40px; flex: none; object-fit: contain; }
 .brand-mark { display: grid; place-items: center; width: 39px; height: 39px; border-radius: 13px; color: #fff; background: linear-gradient(145deg, #19c1b2, #1384a4); font: 800 22px Manrope, sans-serif; box-shadow: 0 6px 16px #071c2d66; }
 .brand strong { display: block; font: 800 15px Manrope, sans-serif; letter-spacing: 1.35px; }
 .brand small { display: block; margin-top: 3px; color: #91a7b5; font-size: 8px; letter-spacing: 1.05px; }
@@ -60,7 +61,9 @@ button:focus-visible, a:focus-visible, select:focus-visible, textarea:focus-visi
 .icon-button { border: 0; background: transparent; }
 
 #appContent { width: min(100%, 1420px); margin: 0 auto; padding: 0 34px 45px; }
-.page-section { padding-top: 35px; scroll-margin-top: 72px; }
+.page-section { display: none; padding-top: 35px; scroll-margin-top: 72px; }
+.page-section.active-page { display: block; animation: screen-in .18s ease-out; }
+@keyframes screen-in { from { opacity: .72; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .welcome-row, .section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; margin-bottom: 20px; }
 .welcome-row { align-items: center; }
 h1, h2, p { margin-top: 0; }
@@ -92,6 +95,10 @@ h2 { margin: 5px 0 0; color: #213747; font: 700 15px Manrope, sans-serif; letter
 .panel-icon { color: #0b9b8e; font-size: 19px; }
 .chart-wrap { min-height: 190px; position: relative; }
 .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-scroll { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.chart-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 6px 12px; max-height: 82px; overflow-y: auto; margin-top: 7px; padding: 2px 4px; color: #677983; font-size: 9px; }
+.chart-legend span { display: flex; min-width: 0; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chart-legend i { width: 9px; height: 9px; flex: none; border-radius: 50%; }
 .chart-empty { min-height: 170px; display: grid; place-items: center; padding: 20px; color: #8b979f; text-align: center; font-size: 11px; line-height: 1.6; }
 .chart-footnote, .source-note { margin: 8px 0 0; color: #82909a; font-size: 9px; line-height: 1.6; }
 .source-note { padding-top: 10px; border-top: 1px solid #eff2f3; }
@@ -105,11 +112,20 @@ h2 { margin: 5px 0 0; color: #213747; font: 700 15px Manrope, sans-serif; letter
 .filter-panel { display: flex; align-items: flex-end; gap: 14px; margin-bottom: 13px; }
 .field-label { min-width: 145px; display: grid; gap: 6px; color: #7f8c96; font-size: 9px; font-weight: 600; }
 .field-label select, .mini-select select { min-height: 37px; padding: 0 30px 0 10px; border: 1px solid #e4eaed; border-radius: 7px; color: #2a414f; background: #fff; font-size: 10px; }
+.field-label select[multiple] { min-height: 96px; padding: 6px 8px; }
 .industry-notice { display: flex; align-items: center; gap: 7px; min-height: 36px; margin-left: auto; color: #778791; font-size: 10px; }
 .industry-notice span:first-child { color: #158d83; font-size: 15px; }
 .filter-panel + .panel { margin-top: 0; }
 .mini-select { display: grid; gap: 3px; min-width: 145px; }
 .mini-select select { min-height: 33px; }
+.screen-filters { flex-wrap: wrap; }
+.screen-filters .field-label { width: min(230px, 100%); }
+.company-multiselect details { position: relative; min-width: 185px; }
+.company-multiselect summary { min-height: 37px; display: flex; align-items: center; padding: 0 30px 0 10px; overflow: hidden; border: 1px solid #e4eaed; border-radius: 7px; color: #2a414f; background: #fff; font-size: 10px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; }
+.company-options { position: absolute; top: calc(100% + 5px); left: 0; z-index: 15; width: min(260px, calc(100vw - 70px)); max-height: 245px; overflow: auto; padding: 7px; border: 1px solid #e1e9eb; border-radius: 8px; background: white; box-shadow: 0 10px 28px #17374b20; }
+.company-option { display: flex; align-items: center; gap: 8px; min-height: 31px; padding: 4px 7px; border-radius: 5px; color: #435965; font-size: 10px; cursor: pointer; }
+.company-option:hover { background: #f2f8f7; }
+.company-option input { accent-color: #118f84; }
 .notice-banner { display: flex; gap: 11px; align-items: flex-start; margin-bottom: 13px; padding: 13px 15px; border: 1px solid #e0eeec; border-radius: 9px; background: #f0f8f7; }
 .notice-icon { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: white; background: #19998d; font-size: 11px; font-weight: 700; }
 .notice-banner strong { color: #28534f; font-size: 11px; }
@@ -170,6 +186,7 @@ td:first-child { color: #354b59; font-weight: 600; }
 .footer-note { margin-top: 20px; color: #8b979f; font-size: 9px; text-align: center; }
 .secondary-button { padding: 9px 12px; border: 1px solid #dce6e8; border-radius: 7px; color: #287a73; background: white; font-size: 10px; font-weight: 700; }
 .secondary-button:hover { background: #f0f8f7; }
+.reset-filters { flex: none; white-space: nowrap; }
 .load-error { margin: 22px 34px 0; padding: 16px; border: 1px solid #f0c8c6; border-radius: 9px; color: #963c40; background: #fff3f2; font-size: 12px; line-height: 1.6; }
 .hidden { display: none !important; }
 
@@ -191,8 +208,10 @@ td:first-child { color: #354b59; font-weight: 600; }
 .chat-message { max-width: 88%; padding: 9px 11px; border-radius: 11px; color: #536570; background: #f1f5f6; font-size: 10px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-message.user { align-self: flex-end; color: #fff; background: #137f78; }
 .chat-message.system { align-self: flex-start; }
-.chat-suggestions { display: flex; gap: 6px; overflow: auto; padding: 0 12px 9px; }
-.chat-suggestions button { flex: none; padding: 6px 8px; border: 1px solid #dcebe8; border-radius: 20px; color: #278078; background: white; font-size: 8px; }
+.chat-suggestions { max-height: 112px; overflow: auto; padding: 0 12px 9px; }
+.suggestion-group { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
+.suggestion-group strong { width: 100%; color: #7d8d95; font-size: 8px; }
+.chat-suggestions button { padding: 5px 7px; border: 1px solid #dcebe8; border-radius: 12px; color: #278078; background: white; font-size: 8px; text-align: left; }
 .chat-form { display: flex; align-items: flex-end; gap: 8px; padding: 10px; border-top: 1px solid #edf1f2; }
 .chat-form textarea { flex: 1; max-height: 100px; min-height: 37px; resize: none; padding: 10px; border: 1px solid #e0e8ea; border-radius: 9px; color: #374e5b; font-size: 10px; line-height: 1.4; }
 .chat-form textarea::placeholder { color: #a0abb1; }
@@ -229,6 +248,7 @@ td:first-child { color: #354b59; font-weight: 600; }
   .breadcrumb { font-size: 10px; }
   .breadcrumb span, .breadcrumb:not(:has(strong)) { display: none; }
   .topbar-filters { gap: 7px; }
+  .reset-filters { padding: 7px; font-size: 8px; }
   .compact-filter { max-width: 105px; }
   .compact-filter span { font-size: 8px; }
   .compact-filter select { max-width: 105px; font-size: 9px; }
@@ -242,6 +262,7 @@ td:first-child { color: #354b59; font-weight: 600; }
   .compare-chart-panel .mini-select, .compare-chart-panel .mini-select select { width: 100%; }
   .filter-panel { align-items: stretch; flex-direction: column; }
   .field-label { width: 100%; }
+  .company-multiselect details, .screen-filters .field-label { width: 100%; }
   .industry-notice { margin-left: 0; }
   .alert-toolbar { flex-direction: column; }
   .alert-evidence { grid-template-columns: repeat(2, minmax(0, 1fr)); }

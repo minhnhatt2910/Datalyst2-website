@@ -12,7 +12,7 @@
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
       <a class="brand" href="#dashboard" aria-label="Datalyst — về Tổng quan">
-        <span class="brand-mark">D</span>
+        <img class="brand-logo" src="logo.png" alt="Logo Datalyst" />
         <span><strong>DATALYST</strong><small>FINANCIAL INTELLIGENCE</small></span>
       </a>
       <div class="sidebar-label">KHÔNG GIAN PHÂN TÍCH</div>
@@ -36,8 +36,6 @@
         <button class="icon-button menu-button" id="menuButton" type="button" aria-label="Mở điều hướng">☰</button>
         <div class="breadcrumb">Không gian phân tích <span>/</span> <strong id="currentSection">Tổng quan</strong></div>
         <div class="topbar-filters">
-          <label class="compact-filter"><span>Doanh nghiệp</span><select id="companyFilter" aria-label="Chọn doanh nghiệp"></select></label>
-          <label class="compact-filter"><span>Kỳ báo cáo</span><select id="yearFilter" aria-label="Chọn kỳ báo cáo"></select></label>
           <div class="avatar">DA</div>
         </div>
       </header>
@@ -51,10 +49,10 @@
               <h1>Tổng quan tài chính</h1>
               <p class="section-intro">Khám phá các chỉ số được cung cấp trong bộ dữ liệu của bạn.</p>
             </div>
-            <div class="scope-switch" role="group" aria-label="Phạm vi số liệu">
-              <button class="scope-button active" data-scope="company" type="button">Doanh nghiệp</button>
-              <button class="scope-button" data-scope="group" type="button">Toàn bộ dữ liệu</button>
-            </div>
+          </div>
+          <div class="panel filter-panel screen-filters">
+            <label class="field-label">Doanh nghiệp<select id="dashboardCompany"></select></label>
+            <label class="field-label">Năm báo cáo<select id="dashboardYear"></select></label>
           </div>
           <div class="scope-note" id="scopeNote"></div>
           <div class="kpi-grid" id="kpiGrid"></div>
@@ -81,7 +79,8 @@
           </div>
           <div class="panel filter-panel">
             <label class="field-label">Chỉ tiêu tài chính<select id="analysisMetric"></select></label>
-            <label class="field-label">Hiển thị đến kỳ<select id="analysisYear"></select></label>
+            <label class="field-label">Năm báo cáo<select id="analysisYear"></select></label>
+            <div class="field-label company-multiselect"><span>Doanh nghiệp trên biểu đồ</span><details id="analysisCompanyPicker"><summary id="analysisCompanySummary">Tất cả doanh nghiệp</summary><div id="analysisCompanies" class="company-options"></div></details></div>
             <div class="industry-notice"><span>ⓘ</span><span>Không có trường ngành trong tệp. Không thể lọc theo ngành.</span></div>
           </div>
           <article class="panel">
@@ -99,6 +98,7 @@
             <div><div class="eyebrow">ĐỐI CHIẾU CÓ ĐIỀU KIỆN</div><h1>So sánh doanh nghiệp</h1><p class="section-intro">Đối chiếu cùng kỳ, cùng chỉ tiêu và chỉ trên các giá trị có dữ liệu.</p></div>
           </div>
           <div class="notice-banner"><span class="notice-icon">!</span><div><strong>Không có dữ liệu ngành</strong><p id="comparisonNotice">Nhóm tham chiếu bên dưới là toàn bộ doanh nghiệp có dữ liệu trong tệp, không phải nhóm cùng ngành.</p></div></div>
+          <div class="panel filter-panel screen-filters"><label class="field-label">Năm báo cáo<select id="comparisonYear"></select></label><div class="industry-notice">Tất cả doanh nghiệp có dữ liệu hợp lệ được đối chiếu.</div></div>
           <div class="comparison-layout">
             <article class="panel compare-chart-panel">
               <div class="panel-heading"><div><div class="eyebrow">TRUNG VỊ THAM CHIẾU</div><h2>Doanh nghiệp và nhóm dữ liệu</h2></div><label class="mini-select"><span>Chỉ tiêu</span><select id="comparisonMetric"></select></label></div>
@@ -107,7 +107,7 @@
             </article>
             <article class="panel compare-table-panel">
               <div class="panel-heading"><div><div class="eyebrow">GIÁ TRỊ CÙNG KỲ</div><h2>Bảng đối chiếu</h2></div></div>
-              <div class="table-scroll"><table><thead><tr><th>Chỉ tiêu</th><th>Đang chọn</th><th>Trung vị nhóm</th></tr></thead><tbody id="comparisonTable"></tbody></table></div>
+              <div class="table-scroll"><table><thead><tr><th>Chỉ tiêu</th><th>Trung vị doanh nghiệp</th><th>Số DN có dữ liệu</th></tr></thead><tbody id="comparisonTable"></tbody></table></div>
             </article>
           </div>
         </section>
@@ -119,7 +119,8 @@
           <div class="notice-banner forecast-banner"><span class="notice-icon">i</span><div><strong>Ước tính thử nghiệm, không phải cam kết</strong><p>Chỉ dự báo khi có tối thiểu 4 kỳ liên tiếp. Mô hình tuyến tính đơn giản, nhạy với biến động và không thay thế kế hoạch tài chính.</p></div></div>
           <div class="panel filter-panel">
             <label class="field-label">Chỉ tiêu dự đoán<select id="forecastMetric"></select></label>
-            <div class="industry-notice">Dùng năm lịch sử đã chọn trên thanh đầu trang làm kỳ kết thúc.</div>
+            <label class="field-label">Doanh nghiệp<select id="forecastCompany"></select></label>
+            <label class="field-label">Năm kết thúc lịch sử<select id="forecastYear"></select></label>
           </div>
           <article class="panel">
             <div class="panel-heading"><div><div class="eyebrow">LỊCH SỬ VÀ ƯỚC TÍNH 1 KỲ</div><h2 id="forecastTitle">Dự báo xu hướng</h2></div><span class="unit-pill" id="forecastUnit"></span></div>
@@ -137,6 +138,7 @@
           <div class="notice-banner warning-banner"><span class="notice-icon">!</span><div><strong>Giới hạn truy vết</strong><p>Một số trường giải thích trong CSV nhắc đến tệp nguồn khác không có trong thư mục. Ứng dụng không xác nhận các tham chiếu đó; bằng chứng bên dưới chỉ dùng giá trị thực sự có trong submission_output.csv.</p></div></div>
           <div class="alert-toolbar">
             <label class="field-label">Doanh nghiệp<select id="alertCompany"></select></label>
+            <label class="field-label">Năm báo cáo<select id="alertYear"></select></label>
             <label class="field-label">Mức độ<select id="alertSeverity"><option value="all">Tất cả</option><option value="HIGH">Cao / Nghiêm trọng</option><option value="MEDIUM">Trung bình</option><option value="LOW">Thấp</option></select></label>
             <label class="field-label">Nhãn rủi ro<select id="alertTag"><option value="all">Tất cả nhãn</option></select></label>
           </div>
@@ -149,6 +151,7 @@
             <button class="secondary-button" id="chooseFileButton" type="button">Chọn CSV khác</button>
             <button class="secondary-button" id="reloadButton" type="button">↻ Tải lại CSV</button>
           </div>
+          <div class="panel filter-panel screen-filters"><label class="field-label">Doanh nghiệp<select id="dataCompany"></select></label><label class="field-label">Năm báo cáo<select id="dataYear"></select></label></div>
           <div class="data-overview" id="dataOverview"></div>
           <article class="panel">
             <div class="panel-heading"><div><div class="eyebrow">LƯỢC ĐỒ TRƯỜNG</div><h2>Trường nguồn và khả năng sử dụng</h2></div><span class="section-tag" id="fieldCount"></span></div>
@@ -179,7 +182,7 @@
       <header class="chat-header"><div class="chat-brand"><span class="chat-avatar">✦</span><div><strong>Datalyst AI</strong><small>Trợ lý dữ liệu · Bản thử nghiệm</small></div></div><button class="chat-close" id="chatClose" type="button" aria-label="Đóng cửa sổ chat">×</button></header>
       <div class="chat-disclaimer">Trả lời tự động từ dữ liệu cục bộ; chưa kết nối mô hình AI.</div>
       <div class="chat-messages" id="chatMessages" aria-live="polite"></div>
-      <div class="chat-suggestions" id="chatSuggestions"><button type="button">Biên lợi nhuận hiện tại?</button><button type="button">Có cảnh báo nào?</button></div>
+      <div class="chat-suggestions" id="chatSuggestions" aria-label="Câu hỏi gợi ý"></div>
       <form class="chat-form" id="chatForm"><textarea id="chatInput" rows="1" aria-label="Nhập câu hỏi" placeholder="Hỏi về chỉ tiêu trong dữ liệu…"></textarea><button type="submit" aria-label="Gửi tin nhắn">➤</button></form>
     </section>
     <button class="chat-toggle" id="chatToggle" type="button" aria-label="Mở Datalyst AI" aria-expanded="false"><span class="chat-toggle-icon">✦</span><span class="chat-pulse"></span></button>

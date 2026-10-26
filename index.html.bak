@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0e2437">
+  <title>Datalyst — Financial Intelligence</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#dashboard" aria-label="Datalyst — về Tổng quan">
+        <img class="brand-logo" src="logo.png" alt="Logo Datalyst" />
+        <span><strong>DATALYST</strong><small>FINANCIAL INTELLIGENCE</small></span>
+      </a>
+      <div class="sidebar-label">KHÔNG GIAN PHÂN TÍCH</div>
+      <nav class="main-nav" aria-label="Điều hướng chính">
+        <a class="nav-link active" href="#dashboard"><span class="nav-icon">◫</span>Tổng quan Dashboard</a>
+        <a class="nav-link" href="#analysis"><span class="nav-icon">⌁</span>Phân tích tài chính</a>
+        <a class="nav-link" href="#comparison"><span class="nav-icon">⇄</span>So sánh doanh nghiệp</a>
+        <a class="nav-link" href="#forecast"><span class="nav-icon">↗</span>Dự đoán tài chính</a>
+        <a class="nav-link" href="#alerts"><span class="nav-icon">◉</span>Cảnh báo rủi ro</a>
+        <a class="nav-link" href="#data"><span class="nav-icon">▤</span>Dữ liệu của tôi</a>
+        <a class="nav-link" href="#about"><span class="nav-icon">ⓘ</span>Giới thiệu dự án</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="data-status"><span class="status-dot"></span><span id="sidebarStatus">Đang tải dữ liệu</span></div>
+        <small>Phân tích có căn cứ. Không thay thế tư vấn chuyên môn.</small>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <button class="icon-button menu-button" id="menuButton" type="button" aria-label="Mở điều hướng">☰</button>
+        <div class="breadcrumb">Không gian phân tích <span>/</span> <strong id="currentSection">Tổng quan</strong></div>
+        <div class="topbar-filters">
+          <div class="avatar">DA</div>
+        </div>
+      </header>
+
+      <div id="loadError" class="load-error hidden" role="alert"></div>
+      <div id="appContent">
+        <section class="page-section" id="dashboard">
+          <div class="welcome-row">
+            <div>
+              <div class="eyebrow"><span class="eyebrow-dot"></span>TRUNG TÂM PHÂN TÍCH DỮ LIỆU</div>
+              <h1>Tổng quan tài chính</h1>
+              <p class="section-intro">Khám phá các chỉ số được cung cấp trong bộ dữ liệu của bạn.</p>
+            </div>
+          </div>
+          <div class="panel filter-panel screen-filters">
+            <label class="field-label">Doanh nghiệp<select id="dashboardCompany"></select></label>
+            <label class="field-label">Năm báo cáo<select id="dashboardYear"></select></label>
+          </div>
+          <div class="scope-note" id="scopeNote"></div>
+          <div class="kpi-grid" id="kpiGrid"></div>
+          <div class="dashboard-grid">
+            <article class="panel trend-panel">
+              <div class="panel-heading">
+                <div><div class="eyebrow">DIỄN BIẾN THEO THỜI GIAN</div><h2>Xu hướng biên lợi nhuận</h2></div>
+                <span class="unit-pill">%</span>
+              </div>
+              <div id="dashboardChart" class="chart-wrap"></div>
+              <p class="chart-footnote">Các giá trị được lấy từ trường tỷ suất trong CSV; không suy ra doanh thu hoặc lợi nhuận tuyệt đối.</p>
+            </article>
+            <article class="panel insight-panel">
+              <div class="panel-heading"><div><div class="eyebrow">ĐIỂM CẦN LƯU Ý</div><h2>Tóm tắt dữ liệu</h2></div><span class="panel-icon">✦</span></div>
+              <div id="dashboardInsight" class="insight-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="page-section" id="analysis">
+          <div class="section-heading">
+            <div><div class="eyebrow">PHÂN TÍCH THEO KỲ</div><h1>Phân tích tài chính</h1><p class="section-intro">Lọc theo doanh nghiệp, chỉ tiêu và năm kết thúc chuỗi quan sát.</p></div>
+            <span class="section-tag">Dữ liệu thực tế</span>
+          </div>
+          <div class="panel filter-panel">
+            <label class="field-label">Chỉ tiêu tài chính<select id="analysisMetric"></select></label>
+            <label class="field-label">Năm báo cáo<select id="analysisYear"></select></label>
+            <div class="field-label company-multiselect"><span>Doanh nghiệp trên biểu đồ</span><details id="analysisCompanyPicker"><summary id="analysisCompanySummary">Tất cả doanh nghiệp</summary><div id="analysisCompanies" class="company-options"></div></details></div>
+            <div class="industry-notice"><span>ⓘ</span><span>Không có trường ngành trong tệp. Không thể lọc theo ngành.</span></div>
+          </div>
+          <article class="panel">
+            <div class="panel-heading">
+              <div><div class="eyebrow">CHUỖI LỊCH SỬ</div><h2 id="analysisChartTitle">Xu hướng chỉ tiêu</h2></div>
+              <span class="unit-pill" id="analysisUnit"></span>
+            </div>
+            <div id="analysisChart" class="chart-wrap"></div>
+            <div class="source-note" id="analysisSource"></div>
+          </article>
+        </section>
+
+        <section class="page-section" id="comparison">
+          <div class="section-heading">
+            <div><div class="eyebrow">ĐỐI CHIẾU CÓ ĐIỀU KIỆN</div><h1>So sánh doanh nghiệp</h1><p class="section-intro">Đối chiếu cùng kỳ, cùng chỉ tiêu và chỉ trên các giá trị có dữ liệu.</p></div>
+          </div>
+          <div class="notice-banner"><span class="notice-icon">!</span><div><strong>Không có dữ liệu ngành</strong><p id="comparisonNotice">Nhóm tham chiếu bên dưới là toàn bộ doanh nghiệp có dữ liệu trong tệp, không phải nhóm cùng ngành.</p></div></div>
+          <div class="panel filter-panel screen-filters"><label class="field-label">Năm báo cáo<select id="comparisonYear"></select></label><div class="industry-notice">Tất cả doanh nghiệp có dữ liệu hợp lệ được đối chiếu.</div></div>
+          <div class="comparison-layout">
+            <article class="panel compare-chart-panel">
+              <div class="panel-heading"><div><div class="eyebrow">TRUNG VỊ THAM CHIẾU</div><h2>Doanh nghiệp và nhóm dữ liệu</h2></div><label class="mini-select"><span>Chỉ tiêu</span><select id="comparisonMetric"></select></label></div>
+              <div id="comparisonChart" class="chart-wrap"></div>
+              <p class="chart-footnote" id="comparisonCounts"></p>
+            </article>
+            <article class="panel compare-table-panel">
+              <div class="panel-heading"><div><div class="eyebrow">GIÁ TRỊ CÙNG KỲ</div><h2>Bảng đối chiếu</h2></div></div>
+              <div class="table-scroll"><table><thead><tr><th>Chỉ tiêu</th><th>Trung vị doanh nghiệp</th><th>Số DN có dữ liệu</th></tr></thead><tbody id="comparisonTable"></tbody></table></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="page-section" id="forecast">
+          <div class="section-heading">
+            <div><div class="eyebrow">ƯỚC TÍNH XU HƯỚNG</div><h1>Dự đoán tài chính</h1><p class="section-intro">Ngoại suy tuyến tính minh bạch từ chuỗi lịch sử của doanh nghiệp đang chọn.</p></div>
+          </div>
+          <div class="notice-banner forecast-banner"><span class="notice-icon">i</span><div><strong>Ước tính thử nghiệm, không phải cam kết</strong><p>Chỉ dự báo khi có tối thiểu 4 kỳ liên tiếp. Mô hình tuyến tính đơn giản, nhạy với biến động và không thay thế kế hoạch tài chính.</p></div></div>
+          <div class="panel filter-panel">
+            <label class="field-label">Chỉ tiêu dự đoán<select id="forecastMetric"></select></label>
+            <label class="field-label">Doanh nghiệp<select id="forecastCompany"></select></label>
+            <label class="field-label">Năm kết thúc lịch sử<select id="forecastYear"></select></label>
+          </div>
+          <article class="panel">
+            <div class="panel-heading"><div><div class="eyebrow">LỊCH SỬ VÀ ƯỚC TÍNH 1 KỲ</div><h2 id="forecastTitle">Dự báo xu hướng</h2></div><span class="unit-pill" id="forecastUnit"></span></div>
+            <div id="forecastResult" class="forecast-result"></div>
+            <div id="forecastChart" class="chart-wrap"></div>
+            <div class="source-note" id="forecastDetails"></div>
+          </article>
+        </section>
+
+        <section class="page-section" id="alerts">
+          <div class="section-heading">
+            <div><div class="eyebrow">TÍN HIỆU ĐƯỢC CUNG CẤP</div><h1>Cảnh báo rủi ro</h1><p class="section-intro">Hiển thị nhãn và mức độ có sẵn trong CSV; đây không phải kết luận kiểm toán.</p></div>
+            <span class="section-tag" id="alertCount"></span>
+          </div>
+          <div class="notice-banner warning-banner"><span class="notice-icon">!</span><div><strong>Giới hạn truy vết</strong><p>Một số trường giải thích trong CSV nhắc đến tệp nguồn khác không có trong thư mục. Ứng dụng không xác nhận các tham chiếu đó; bằng chứng bên dưới chỉ dùng giá trị thực sự có trong submission_output.csv.</p></div></div>
+          <div class="alert-toolbar">
+            <label class="field-label">Doanh nghiệp<select id="alertCompany"></select></label>
+            <label class="field-label">Năm báo cáo<select id="alertYear"></select></label>
+            <label class="field-label">Mức độ<select id="alertSeverity"><option value="all">Tất cả</option><option value="HIGH">Cao / Nghiêm trọng</option><option value="MEDIUM">Trung bình</option><option value="LOW">Thấp</option></select></label>
+            <label class="field-label">Nhãn rủi ro<select id="alertTag"><option value="all">Tất cả nhãn</option></select></label>
+          </div>
+          <div id="alertsList" class="alerts-list"></div>
+        </section>
+
+        <section class="page-section" id="data">
+          <div class="section-heading">
+            <div><div class="eyebrow">KIỂM TRA VÀ TRUY VẾT</div><h1>Dữ liệu của tôi</h1><p class="section-intro">Nguồn đang dùng và trạng thái kiểm tra dữ liệu được nạp vào trang.</p></div>
+            <button class="secondary-button" id="chooseFileButton" type="button">Chọn CSV khác</button>
+            <button class="secondary-button" id="reloadButton" type="button">↻ Tải lại CSV</button>
+          </div>
+          <div class="panel filter-panel screen-filters"><label class="field-label">Doanh nghiệp<select id="dataCompany"></select></label><label class="field-label">Năm báo cáo<select id="dataYear"></select></label></div>
+          <div class="data-overview" id="dataOverview"></div>
+          <article class="panel">
+            <div class="panel-heading"><div><div class="eyebrow">LƯỢC ĐỒ TRƯỜNG</div><h2>Trường nguồn và khả năng sử dụng</h2></div><span class="section-tag" id="fieldCount"></span></div>
+            <div class="table-scroll"><table><thead><tr><th>Trường CSV</th><th>Kiểu / đơn vị</th><th>Dữ liệu</th><th>Diễn giải trong ứng dụng</th></tr></thead><tbody id="fieldTable"></tbody></table></div>
+          </article>
+          <article class="panel data-quality-panel">
+            <div class="panel-heading"><div><div class="eyebrow">KIỂM TRA CHẤT LƯỢNG</div><h2>Kết quả xác thực</h2></div></div>
+            <div id="qualityChecks" class="quality-list"></div>
+          </article>
+        </section>
+
+        <section class="page-section about-section" id="about">
+          <div class="section-heading"><div><div class="eyebrow">DATALYST</div><h1>Giới thiệu dự án</h1><p class="section-intro">Công cụ minh họa phân tích tài chính với ưu tiên: dữ liệu thật, công thức minh bạch và giới hạn được công khai.</p></div></div>
+          <div class="about-grid">
+            <article class="panel"><span class="about-icon">⌕</span><h2>Không bịa số liệu</h2><p>Giá trị thiếu được giữ là “Chưa có dữ liệu phù hợp”. Ứng dụng không tạo doanh thu, tài sản hoặc tên/ngành doanh nghiệp chưa có trong tệp.</p></article>
+            <article class="panel"><span class="about-icon">ƒ</span><h2>Phép tính có thể kiểm tra</h2><p>Trung vị nhóm được tính trên các giá trị cùng kỳ hiện có. Dự báo dùng hồi quy tuyến tính đơn giản, chỉ khi chuỗi đủ liên tục.</p></article>
+            <article class="panel"><span class="about-icon">✦</span><h2>Trợ lý thử nghiệm</h2><p>Chatbot trả lời theo ngữ cảnh CSV bằng các quy tắc cục bộ. Chưa kết nối mô hình AI hay dịch vụ backend.</p></article>
+          </div>
+          <div class="footer-note">Datalyst Financial Intelligence · Phục vụ phân tích tham khảo, không phải tư vấn đầu tư, kế toán hoặc kiểm toán.</div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="sidebar-scrim" id="sidebarScrim"></div>
+  <div class="chat-widget">
+    <section class="chat-window hidden" id="chatWindow" aria-label="Trò chuyện với Datalyst AI" aria-hidden="true">
+      <header class="chat-header"><div class="chat-brand"><span class="chat-avatar">✦</span><div><strong>Datalyst AI</strong><small>Trợ lý dữ liệu · Bản thử nghiệm</small></div></div><button class="chat-close" id="chatClose" type="button" aria-label="Đóng cửa sổ chat">×</button></header>
+      <div class="chat-disclaimer">Trả lời tự động từ dữ liệu cục bộ; chưa kết nối mô hình AI.</div>
+      <div class="chat-messages" id="chatMessages" aria-live="polite"></div>
+      <div class="chat-suggestions" id="chatSuggestions" aria-label="Câu hỏi gợi ý"></div>
+      <form class="chat-form" id="chatForm"><textarea id="chatInput" rows="1" aria-label="Nhập câu hỏi" placeholder="Hỏi về chỉ tiêu trong dữ liệu…"></textarea><button type="submit" aria-label="Gửi tin nhắn">➤</button></form>
+    </section>
+    <button class="chat-toggle" id="chatToggle" type="button" aria-label="Mở Datalyst AI" aria-expanded="false"><span class="chat-toggle-icon">✦</span><span class="chat-pulse"></span></button>
+  </div>
+</body>
+</html>

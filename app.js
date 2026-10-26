@@ -618,6 +618,7 @@ function render() {
 function answerChat(question) {
   const text = question.toLocaleLowerCase('vi');
   const requestedCompany = text.match(/\bc\s*0?(\d{1,3})\b/i);
+  const mentionedCompanies = [...text.matchAll(/\bc\s*0?(\d{1,3})\b/gi)].map((match) => `C${String(Number(match[1])).padStart(3, '0')}`);
   const context = STATE.page === 'forecast' ? STATE.filters.forecast : STATE.page === 'analysis' ? STATE.filters.analysis : STATE.page === 'alerts' ? STATE.filters.alerts : STATE.page === 'comparison' ? STATE.filters.comparison : STATE.page === 'data' ? STATE.filters.data : STATE.filters.dashboard;
   const activeCompany = context.company || (Array.isArray(context.companies) && context.companies.length === 1 ? context.companies[0] : 'all');
   const company = requestedCompany ? `C${String(Number(requestedCompany[1])).padStart(3, '0')}` : activeCompany;
@@ -631,7 +632,7 @@ function answerChat(question) {
   const riskIntent = /cảnh báo|rủi ro|nguy cơ/.test(text);
   const forecastIntent = /dự báo|dự đoán|năm tới|các năm tới/.test(text);
   const metricAliases = [
-    ['revenue_growth_pct', /doanh thu|tăng trưởng/], ['gross_margin_pct', /biên lợi nhuận gộp|biên gộp/],
+    ['revenue_growth_pct', /tăng trưởng doanh thu|tăng trưởng/], ['gross_margin_pct', /biên lợi nhuận gộp|biên gộp/],
     ['operating_margin_pct', /biên lợi nhuận hoạt động|biên hoạt động/], ['net_margin_pct', /biên lợi nhuận ròng|biên lợi nhuận(?! gộp| hoạt động)|lợi nhuận/],
     ['cfo_to_net_income_x', /cfo\s*\/|cfo\s*và\s*lợi nhuận/], ['cfo_margin_pct', /dòng tiền hoạt động|\bcfo\b/],
     ['free_cash_flow_vnd_mn', /dòng tiền tự do|\bfcf\b/], ['debt_to_assets_pct', /nợ.*tài sản|đòn bẩy/],
@@ -639,20 +640,41 @@ function answerChat(question) {
     ['quick_ratio_x', /thanh toán nhanh/], ['dso_days', /phải thu|công nợ/], ['inventory_days', /tồn kho|hàng tồn/],
     ['interest_coverage_x', /trả lãi|lãi vay/], ['risk_score', /điểm rủi ro/], ['roa_pct', /\broa\b/], ['roe_pct', /\broe\b/]
   ];
+  const asksAbsoluteRevenue = /doanh thu.*(bao nhiêu|giá trị|số tiền|đạt bao nhiêu)/.test(text) && !/tăng trưởng|tăng.*doanh thu|doanh thu.*tăng/.test(text);
+  if (asksAbsoluteRevenue) return `CSV hiện chỉ có chỉ tiêu tăng trưởng doanh thu (revenue_growth_pct), không có số tiền doanh thu tuyệt đối. Hãy hỏi về tăng trưởng doanh thu; nguồn: ${STATE.sourceName}.`;
+  const asksAbsoluteProfit = /lợi nhuận.*(bao nhiêu|giá trị|số tiền|đạt bao nhiêu)/.test(text) && !/biên lợi nhuận/.test(text);
+  if (asksAbsoluteProfit) return `CSV hiện có các tỷ lệ biên lợi nhuận nhưng không có số tiền lợi nhuận tuyệt đối. Hãy hỏi về biên lợi nhuận; nguồn: ${STATE.sourceName}.`;
+  const asksAbsoluteCfo = /(\bcfo\b|dòng tiền hoạt động)/.test(text) && !/(biên|margin|tỷ lệ|cfo\s*\/)/.test(text);
+  if (asksAbsoluteCfo) return `CSV có biên CFO (cfo_margin_pct) và tỷ lệ CFO/lợi nhuận ròng (cfo_to_net_income_x), nhưng không có số tiền CFO tuyệt đối. Nguồn: ${STATE.sourceName}.`;
   const metric = metricAliases.find(([key, pattern]) => STATE.metrics.includes(key) && pattern.test(text))?.[0];
   if (riskIntent) {
-    const flagged = scopedRows.filter((row) => riskTagsFor(row).length).map((row) => {
+    const alertRows = yearMatch ? STATE.rows.filter((row) => Number(row.fiscal_year) === endYear && (company === 'all' || row.company_id === company)) : scopedRows;
+    const flagged = alertRows.filter((row) => riskTagsFor(row).length).map((row) => {
       const tags = riskTagsFor(row);
       const evidence = evidenceForAlert(row, tags).filter((item) => item.value !== null).map((item) => `${item.label}: ${metricDisplay(item.key, item.value)}`);
       const sourceRule = String(row.evidence_fields || '').split(' || ').filter((entry) => tags.some((tag) => entry.startsWith(`${tag}:`))).map((entry) => entry.split('|').slice(-1)[0].trim()).filter(Boolean);
       return `${row.company_id} năm ${row.fiscal_year}: ${tags.map((tag) => TAG_LABELS[tag] || tag).join(', ')}; mức ${severityLabel(row.predicted_severity)}, điểm ${metricDisplay('risk_score', getNumber(row, 'risk_score'))}${evidence.length ? `; số liệu kèm theo: ${evidence.join(', ')}` : ''}${sourceRule.length ? `; điều kiện được CSV mô tả: ${[...new Set(sourceRule)].join('; ')}` : ''}`;
     }).slice(-8);
-    return flagged.length ? `Nhãn cảnh báo trong dữ liệu${company === 'all' ? '' : ` của ${company}`} (${yearsLabel}):\n${flagged.join('\n')}\nĐiều kiện và nhãn là thông tin do CSV cung cấp, chưa được xác minh từ báo cáo nguồn; không phải kết luận kiểm toán hay quan hệ nhân quả.` : `Không có nhãn rủi ro trong phạm vi dữ liệu${company === 'all' ? '' : ` của ${company}`} (${yearsLabel}). Điều này không chứng minh không có rủi ro.`;
+    const alertYearsLabel = yearMatch ? String(endYear) : yearsLabel;
+    return flagged.length ? `Nhãn cảnh báo trong dữ liệu${company === 'all' ? '' : ` của ${company}`} (${alertYearsLabel}):\n${flagged.join('\n')}\nĐiều kiện và nhãn là thông tin do CSV cung cấp, chưa được xác minh từ báo cáo nguồn; không phải kết luận kiểm toán hay quan hệ nhân quả.` : `Không có nhãn rủi ro trong phạm vi dữ liệu${company === 'all' ? '' : ` của ${company}`} (${alertYearsLabel}). Điều này không chứng minh không có rủi ro.`;
   }
   if (compare) {
     const compareMetrics = [...new Set(metricAliases.filter(([key, pattern]) => STATE.metrics.includes(key) && pattern.test(text)).map(([key]) => key))];
     if (!compareMetrics.length) return 'Bạn muốn so sánh chỉ tiêu nào (ví dụ biên lợi nhuận, tăng trưởng doanh thu hay nợ/tài sản)? CSV không có trường ngành nên chỉ có thể so sánh toàn bộ nhóm dữ liệu.';
     const compareYear = Number.isFinite(endYear) ? endYear : Math.max(...sortedYears());
+    if (mentionedCompanies.length >= 2) {
+      const [leftId, rightId] = mentionedCompanies;
+      const leftRow = rowFor(leftId, compareYear);
+      const rightRow = rowFor(rightId, compareYear);
+      const comparisons = compareMetrics.map((key) => {
+        const left = getNumber(leftRow, key);
+        const right = getNumber(rightRow, key);
+        if (left === null || right === null) return `${METRICS[key].label}: không đủ dữ liệu cùng kỳ cho ${leftId} và ${rightId} trong năm ${compareYear}.`;
+        const delta = METRICS[key].unit === '%' ? `${formatNumber(left - right, METRICS[key].decimals)} điểm phần trăm` : metricDisplay(key, left - right);
+        return `${METRICS[key].label} năm ${compareYear}: ${leftId} ${metricDisplay(key, left)}; ${rightId} ${metricDisplay(key, right)}; chênh lệch ${leftId} − ${rightId} là ${delta}.`;
+      });
+      return `Đối chiếu cùng kỳ từ ${STATE.sourceName}: ${comparisons.join(' ')} Chênh lệch là phép trừ hai giá trị; điều này chỉ so sánh chỉ tiêu được hỏi, không đánh giá toàn diện doanh nghiệp.`;
+    }
     const comparisons = compareMetrics.map((key) => {
       const ranked = sortedCompanies().map((id) => ({ id, value: getNumber(rowFor(id, compareYear), key) })).filter((item) => item.value !== null).sort((a, b) => b.value - a.value);
       return ranked.length ? `${METRICS[key].label}: ${ranked.slice(0, 4).map((item) => `${item.id} ${metricDisplay(key, item.value)}`).join('; ')}${ranked.length > 4 ? `; … ${ranked.length} doanh nghiệp có dữ liệu` : ''}. Cao nhất: ${ranked[0].id}.` : `${METRICS[key].label}: không có giá trị hợp lệ.`;
@@ -698,6 +720,15 @@ function answerChat(question) {
     return `${company === 'all' ? `Tổng quan ${targetRows.length} doanh nghiệp` : `Tổng quan ${company}`} tại ${latest}${company === 'all' ? ' (các tỷ lệ dùng trung vị)' : ''}: ${evidence.join('; ')}. Có ${flaggedCount} bản ghi gắn nhãn rủi ro từ trung bình trở lên. Đây là mô tả dữ liệu, không xác định nguyên nhân.`;
   }
   if (metric) {
+    if (yearMatch && !trends) {
+      if (company === 'all') return 'Câu hỏi thiếu mã doanh nghiệp. Hãy nêu mã như C001 hoặc chọn một doanh nghiệp trong bộ lọc hiện tại.';
+      const exactRow = rowFor(company, endYear);
+      if (!exactRow) return `Không có bản ghi cho ${company} trong năm ${endYear} ở ${STATE.sourceName}; không dùng số liệu năm khác thay thế.`;
+      const exactValue = getNumber(exactRow, metric);
+      if (exactValue === null) return `Trường ${metric} không có giá trị hợp lệ cho ${company} năm ${endYear} trong ${STATE.sourceName}.`;
+      return `${METRICS[metric].label} của ${company}, năm ${endYear}: ${metricDisplay(metric, exactValue)}. Nguồn: ${STATE.sourceName}, cột ${metric}; giá trị được cung cấp sẵn trong CSV.`;
+    }
+    if (company === 'all' && !trends) return 'Câu hỏi thiếu mã doanh nghiệp. Hãy nêu mã như C001 hoặc chọn một doanh nghiệp trong bộ lọc hiện tại.';
     if (!scopedRows.length) return `Không tìm thấy bản ghi cho ${company === 'all' ? 'nhóm doanh nghiệp' : company} ${yearsLabel}.`;
     const valid = scopedRows.map((row) => ({ year: Number(row.fiscal_year), value: getNumber(row, metric) })).filter((point) => point.value !== null);
     if (!valid.length) return `Trường ${metric} có trong cấu trúc dữ liệu nhưng không có giá trị hợp lệ trong phạm vi ${yearsLabel}.`;
@@ -710,10 +741,14 @@ function answerChat(question) {
     if (trends && valid.length > 1) {
       const first = valid[0]; const delta = latest.value - first.value;
       const direction = delta > 0 ? 'tăng' : delta < 0 ? 'giảm' : 'không đổi';
+      const absoluteChange = (value) => METRICS[metric].unit === '%'
+        ? `${formatNumber(value, METRICS[metric].decimals)} điểm phần trăm`
+        : metricDisplay(metric, value);
+      const relativeChange = first.value === 0 ? null : delta / Math.abs(first.value) * 100;
       const changes = valid.slice(1).map((point, index) => ({ from: valid[index], to: point, amount: Math.abs(point.value - valid[index].value) })).sort((a, b) => b.amount - a.amount);
       const sequence = valid.map((point) => `${point.year}: ${metricDisplay(metric, point.value)}`).join('; ');
       const largest = changes[0];
-      return `${METRICS[metric].label} của ${company}, ${first.year}–${latest.year}: ${sequence}. Tổng thể ${direction} ${metricDisplay(metric, Math.abs(delta))}; biến động lớn nhất là ${largest.from.year}–${largest.to.year} (${metricDisplay(metric, largest.amount)}). Chuỗi có ${valid.length} kỳ hợp lệ; các khoảng thiếu bị bỏ trống. Diễn biến này không tự chứng minh nguyên nhân.`;
+      return `${METRICS[metric].label} của ${company}, ${first.year}–${latest.year}: ${sequence}. Tổng thể ${direction} ${absoluteChange(delta)}${relativeChange === null ? '' : ` (${relativeChange > 0 ? '+' : ''}${formatNumber(relativeChange, 1)}% tương đối)`}; biến động tuyệt đối lớn nhất là ${largest.from.year}–${largest.to.year} (${absoluteChange(largest.amount)}). Chuỗi có ${valid.length} kỳ hợp lệ; các khoảng thiếu bị bỏ trống. Diễn biến này không tự chứng minh nguyên nhân.`;
     }
     return `${METRICS[metric].label} của ${company}, năm ${latest.year}: ${metricDisplay(metric, latest.value)}. Nguồn: ${STATE.sourceName}, cột ${metric}.`;
   }
@@ -726,6 +761,98 @@ function addChatMessage(text, type) {
   message.textContent = text;
   $('#chatMessages').append(message);
   $('#chatMessages').scrollTop = $('#chatMessages').scrollHeight;
+}
+
+const CHAT_FEEDBACK_KEY = 'datalyst_chat_feedback_v1';
+let chatResponseSequence = 0;
+
+function readChatFeedback() {
+  try {
+    const saved = localStorage.getItem(CHAT_FEEDBACK_KEY);
+    const records = saved ? JSON.parse(saved) : [];
+    return Array.isArray(records) ? records : [];
+  } catch (_) {
+    return null;
+  }
+}
+
+function addChatResponse(question, answer) {
+  const message = document.createElement('article');
+  const responseId = `chat-response-${Date.now()}-${chatResponseSequence++}`;
+  message.className = 'chat-message system chat-response';
+  message.dataset.responseId = responseId;
+  message.dataset.question = question;
+
+  const body = document.createElement('div');
+  body.className = 'chat-answer';
+  body.textContent = answer;
+  message.append(body);
+
+  const scope = document.createElement('div');
+  scope.className = 'chat-evidence';
+  const company = question.match(/\bc\s*0?(\d{1,3})\b/i)?.[0]?.replace(/\s+/g, '').toUpperCase();
+  const year = question.match(/\b20\d{2}\b/)?.[0];
+  const fields = STATE.metrics.filter((key) => answer.includes(key) || answer.includes(METRICS[key]?.label || key));
+  scope.textContent = `Nguồn kiểm tra: ${STATE.sourceName}${fields.length ? ` · cột ${fields.join(', ')}` : ''}${company ? ` · mã được hỏi ${company}` : ''}${year ? ` · kỳ được hỏi ${year}` : ''}. Nội dung truy xuất cục bộ từ CSV; trường không nêu ở đây chưa được xác minh độc lập với báo cáo gốc.`;
+  message.append(scope);
+
+  const controls = document.createElement('div');
+  controls.className = 'chat-feedback';
+  controls.setAttribute('aria-label', 'Đánh giá câu trả lời');
+  [
+    ['useful', 'Xác nhận hữu ích'],
+    ['review', 'Cần kiểm tra thêm'],
+    ['disagree', 'Không đồng ý']
+  ].forEach(([value, label]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.feedback = value;
+    button.textContent = label;
+    controls.append(button);
+  });
+  const status = document.createElement('div');
+  status.className = 'chat-feedback-status';
+  status.setAttribute('aria-live', 'polite');
+  controls.append(status);
+  message.append(controls);
+  $('#chatMessages').append(message);
+  $('#chatMessages').scrollTop = $('#chatMessages').scrollHeight;
+}
+
+function recordChatFeedback(button) {
+  const message = button.closest('.chat-response');
+  if (!message) return;
+  const controls = message.querySelector('.chat-feedback');
+  const status = controls.querySelector('.chat-feedback-status');
+  const labels = { useful: 'Xác nhận hữu ích', review: 'Cần kiểm tra thêm', disagree: 'Không đồng ý' };
+  const feedback = button.dataset.feedback;
+  const records = readChatFeedback();
+  if (!records) {
+    status.textContent = 'Không thể lưu cục bộ trong trình duyệt này.';
+    return;
+  }
+  const record = {
+    id: message.dataset.responseId,
+    question: message.dataset.question || '',
+    answer: message.querySelector('.chat-answer')?.textContent || '',
+    company: message.querySelector('.chat-evidence')?.textContent.match(/mã được hỏi ([^·.]+)/)?.[1]?.trim() || null,
+    period: message.querySelector('.chat-evidence')?.textContent.match(/kỳ được hỏi (\d{4})/)?.[1] || null,
+    feedback,
+    timestamp: new Date().toISOString()
+  };
+  const prior = records.findIndex((item) => item.id === record.id);
+  if (prior >= 0) records[prior] = record;
+  else records.push(record);
+  try {
+    localStorage.setItem(CHAT_FEEDBACK_KEY, JSON.stringify(records.slice(-100)));
+    controls.querySelectorAll('button').forEach((item) => {
+      item.disabled = true;
+      item.classList.toggle('selected', item === button);
+    });
+    status.textContent = `${labels[feedback]} · đã lưu trên trình duyệt này.`;
+  } catch (_) {
+    status.textContent = 'Không thể lưu cục bộ (bộ nhớ bị chặn hoặc đã đầy).';
+  }
 }
 
 function updateVietnamClock() {
@@ -789,8 +916,11 @@ function initInteractions() {
     addChatMessage('Đang tra cứu dữ liệu…', 'system');
     const pending = $('#chatMessages').lastElementChild;
     window.setTimeout(() => {
-      try { pending.textContent = answerChat(question); }
-      catch (error) { pending.textContent = `Không thể hoàn tất tra cứu: ${error.message || 'Lỗi xử lý dữ liệu.'} Hãy thử câu hỏi khác hoặc kiểm tra CSV.`; }
+      let answer;
+      try { answer = answerChat(question); }
+      catch (error) { answer = `Không thể hoàn tất tra cứu: ${error.message || 'Lỗi xử lý dữ liệu.'} Hãy thử câu hỏi khác hoặc kiểm tra CSV.`; }
+      pending.remove();
+      addChatResponse(question, answer);
       $('#chatMessages').scrollTop = $('#chatMessages').scrollHeight;
     }, 220);
   });
@@ -805,6 +935,10 @@ function initInteractions() {
       $('#chatInput').value = event.target.textContent;
       $('#chatForm').requestSubmit();
     }
+  });
+  $('#chatMessages').addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-feedback]');
+    if (button) recordChatFeedback(button);
   });
   $('#menuButton').addEventListener('click', () => {
     $('#sidebar').classList.add('open');

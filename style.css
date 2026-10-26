@@ -190,6 +190,75 @@ td:first-child { color: #354b59; font-weight: 600; }
 .load-error { margin: 22px 34px 0; padding: 16px; border: 1px solid #f0c8c6; border-radius: 9px; color: #963c40; background: #fff3f2; font-size: 12px; line-height: 1.6; }
 .hidden { display: none !important; }
 
+/* Compact brand header and horizontal primary navigation. */
+.app-shell { display: flex; flex-direction: column; }
+.sidebar { width: 100%; position: relative; inset: auto; z-index: 20; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 0 20px; padding: 10px clamp(16px, 3vw, 42px) 0; border-bottom: 1px solid #e6edf0; background: #fff; color: var(--ink); box-shadow: 0 3px 16px #17374b08; }
+.brand { grid-column: 1 / -1; justify-self: center; padding: 0; }
+.brand-logo { display: block; width: 174px; height: 78px; object-fit: contain; }
+.viet-clock { grid-column: 1 / -1; justify-self: center; margin: 0 0 12px; padding: 7px 14px; border: 1px solid #e1efed; border-radius: 999px; color: #42636a; background: #f3faf9; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sidebar-label { display: none; }
+.main-nav { grid-column: 1 / -1; display: flex; justify-content: center; gap: 5px; min-width: 0; padding: 0 0 10px; }
+.nav-link { min-height: 42px; justify-content: center; gap: 7px; padding: 0 12px; border-radius: 8px; color: #4d6470; font-size: 13px; white-space: nowrap; }
+.nav-link:hover { color: #116e69; background: #eff8f7; }
+.nav-link.active { color: #087f76; background: #e8f7f4; box-shadow: inset 0 -3px #159d91; }
+.nav-icon { width: auto; color: #66808b; font-size: 16px; }
+.nav-link.active .nav-icon { color: #07877d; }
+.sidebar-bottom { grid-column: 1 / -1; justify-self: end; grid-row: 4; padding: 0 0 8px; border: 0; }
+.sidebar-bottom small { display: none; }
+.data-status { margin: 0; color: #5f747c; font-size: 11px; }
+.main-content { flex: 1; min-height: 0; margin-left: 0; }
+.topbar { top: 0; height: 54px; padding: 0 clamp(18px, 3vw, 42px); }
+.page-section { padding-top: 29px; }
+h1 { font-size: 27px; }
+h2 { font-size: 17px; }
+.section-intro { font-size: 13px; }
+.eyebrow { font-size: 10px; }
+.kpi-top { font-size: 11px; }
+.kpi-value { font-size: 24px; }
+.kpi-meta { font-size: 10px; }
+.field-label { font-size: 11px; }
+.field-label select, .mini-select select { font-size: 12px; }
+.chart-legend, .chart-footnote, .source-note { font-size: 11px; }
+.insight-item, td, .forecast-result { font-size: 12px; }
+th { font-size: 10px; }
+.team-intro { margin-bottom: 13px; }
+.team-intro h2 { margin-top: 6px; }
+.team-intro p { max-width: 850px; margin: 8px 0 0; color: #627581; font-size: 13px; line-height: 1.7; }
+.team-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+.team-card { position: relative; min-width: 0; min-height: 142px; padding: 17px; border: 1px solid #e5ecef; border-radius: 11px; background: white; box-shadow: 0 4px 14px #17374b08; }
+.member-avatar { display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 12px; border-radius: 12px; color: #087f76; background: #e7f6f3; font: 700 13px Manrope, sans-serif; }
+.team-card h3 { margin: 0; color: #213b4a; font: 700 15px Manrope, sans-serif; overflow-wrap: anywhere; }
+.team-card p { margin: 5px 0 0; color: #71828c; font-size: 12px; }
+.team-lead { border-color: #b9e4de; background: linear-gradient(140deg, #fff, #f5fbfa); }
+.team-badge { position: absolute; top: 16px; right: 14px; padding: 5px 8px; border-radius: 20px; color: #16766e; background: #e5f5f1; font-size: 9px; font-weight: 700; letter-spacing: .3px; }
+
+@media (max-width: 1120px) {
+  .sidebar { width: 100%; }
+  .main-content { margin-left: 0; }
+  .main-nav { justify-content: flex-start; overflow-x: auto; scrollbar-width: thin; }
+  .nav-link { flex: 0 0 auto; padding: 0 10px; font-size: 12px; }
+}
+@media (max-width: 800px) {
+  .sidebar { display: block; width: 100%; position: relative; transform: none; transition: none; padding: 8px 12px 0; }
+  .brand-logo { width: 150px; height: 67px; }
+  .viet-clock { width: fit-content; max-width: 100%; margin: 0 auto 9px; padding: 6px 11px; font-size: 12px; text-align: center; }
+  .main-nav { gap: 3px; padding-bottom: 8px; }
+  .nav-link { min-height: 39px; }
+  .sidebar-bottom { display: none; }
+  .topbar { height: 50px; }
+  .menu-button { display: none !important; }
+  .team-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .team-grid { gap: 8px; }
+  .team-card { min-height: 132px; padding: 13px; }
+  .team-card h3 { font-size: 13px; }
+  .team-card p { font-size: 11px; }
+  .team-badge { position: static; display: inline-block; margin: -2px 0 8px; }
+  .team-lead .member-avatar { margin-bottom: 7px; }
+  .kpi-value { font-size: 20px; }
+}
+
 .chat-widget { position: fixed; right: 25px; bottom: 24px; z-index: 50; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
 .chat-toggle { width: 58px; height: 58px; position: relative; display: grid; place-items: center; border: 0; border-radius: 50%; color: white; background: linear-gradient(145deg, #19b9a9, #087f78); box-shadow: 0 7px 24px #0d736b55; }
 .chat-toggle:hover { transform: translateY(-2px); box-shadow: 0 10px 26px #0d736b66; }
@@ -271,4 +340,27 @@ td:first-child { color: #354b59; font-weight: 600; }
   .chat-toggle { width: 54px; height: 54px; }
   .chat-window { width: min(360px, calc(100vw - 54px)); height: min(470px, calc(100dvh - 92px)); }
   .load-error { margin: 14px 12px 0; }
+}
+
+/* Keep the former sidebar breakpoints from reintroducing the vertical layout. */
+@media (max-width: 1120px) {
+  .sidebar { width: 100%; position: relative; inset: auto; }
+  .main-content { margin-left: 0; }
+}
+@media (max-width: 800px) {
+  .sidebar { display: block; width: 100%; position: relative; transform: none; transition: none; }
+  .menu-button { display: none !important; }
+}
+@media (max-width: 520px) {
+  .kpi-value { font-size: 20px; }
+}
+
+/* Larger centered logo, with the Vietnam date and time in the upper-left. */
+.sidebar { position: relative; }
+.brand-logo { width: 264px; height: 118px; }
+.viet-clock { position: absolute; top: 39px; left: clamp(16px, 3vw, 42px); z-index: 1; margin: 0; transform: none; }
+@media (max-width: 800px) {
+  .brand { display: flex; justify-content: center; margin-top: -5px; }
+  .brand-logo { width: 210px; height: 94px; }
+  .viet-clock { position: static; width: fit-content; max-width: 100%; margin: 0 0 -7px 4px; padding: 6px 10px; transform: none; font-size: 11px; text-align: left; }
 }

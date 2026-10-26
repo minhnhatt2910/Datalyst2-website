@@ -728,6 +728,27 @@ function addChatMessage(text, type) {
   $('#chatMessages').scrollTop = $('#chatMessages').scrollHeight;
 }
 
+function updateVietnamClock() {
+  const clock = $('#vietClock');
+  if (!clock) return;
+  const parts = new Intl.DateTimeFormat('vi-VN', {
+    timeZone: 'Asia/Ho_Chi_Minh', weekday: 'long', day: '2-digit', month: '2-digit',
+    year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  clock.textContent = `${values.weekday}, ${values.day}/${values.month}/${values.year} | ${values.hour}:${values.minute} (GMT+7)`;
+}
+
+function startVietnamClock() {
+  updateVietnamClock();
+  const now = new Date();
+  const delay = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+  window.setTimeout(() => {
+    updateVietnamClock();
+    window.setInterval(updateVietnamClock, 60_000);
+  }, delay);
+}
+
 function setChatOpen(open) {
   $('#chatWindow').classList.toggle('hidden', !open);
   $('#chatWindow').setAttribute('aria-hidden', String(!open));
@@ -826,6 +847,7 @@ function initInteractions() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  startVietnamClock();
   initInteractions();
   loadCsv();
 });

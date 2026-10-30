@@ -52,7 +52,7 @@ const GROUP_MEAN_METRICS = new Set([
   'current_ratio_x', 'debt_to_assets_pct', 'cfo_margin_pct', 'cfo_to_net_income_x',
   'free_cash_flow_vnd_mn'
 ]);
-const STATE = { rows: [], headers: [], sourceName: 'submission_output.csv', metrics: [], page: 'dashboard', whatIfLog: [], filters: { dashboard: { company: 'all', year: 'all' }, analysis: { companies: 'all', year: 'all' }, comparison: { year: 'all' }, forecast: { company: 'all', year: 'all' }, whatIf: { company: 'all', year: 'all' }, alerts: { company: 'all', year: 'all' }, data: { company: 'all', year: 'all' } } };
+const STATE = { rows: [], headers: [], sourceName: 'submission_output.csv', metrics: [], page: 'dashboard', whatIfLog: [], showExtraKpis: false, filters: { dashboard: { company: 'all', year: 'all' }, analysis: { companies: ['C001'], year: 'all' }, comparison: { year: 'all' }, forecast: { company: 'all', year: 'all' }, whatIf: { company: 'all', year: 'all' }, alerts: { company: 'all', year: 'all' }, data: { company: 'all', year: 'all' } } };
 const $ = (selector) => document.querySelector(selector);
 const apiUrl = (path) => {
   const base = $('meta[name="datalyst-api-base"]')?.content.trim().replace(/\/+$/, '') || '';
@@ -222,8 +222,10 @@ function configureSelectors() {
   });
   const analysisCompanies = $('#analysisCompanies');
   const previousCompanies = STATE.filters.analysis.companies;
-  analysisCompanies.innerHTML = `<label class="company-option"><input type="checkbox" value="all" ${previousCompanies === 'all' ? 'checked' : ''}>Tất cả doanh nghiệp</label>${companies.map((company) => `<label class="company-option"><input type="checkbox" value="${escapeHtml(company)}" ${previousCompanies === 'all' || previousCompanies.includes(company) ? 'checked' : ''}>${escapeHtml(company)}</label>`).join('')}`;
-  $('#analysisCompanySummary').textContent = previousCompanies === 'all' ? 'Tất cả doanh nghiệp' : previousCompanies.length === 1 ? previousCompanies[0] : `${previousCompanies.length} doanh nghiệp đã chọn`;
+  const selectedCompanies = previousCompanies === 'all' ? 'all' : Array.isArray(previousCompanies) ? previousCompanies : ['C001'];
+  STATE.filters.analysis.companies = selectedCompanies;
+  analysisCompanies.innerHTML = `<label class="company-option"><input type="checkbox" value="all" ${selectedCompanies === 'all' ? 'checked' : ''}>Tất cả doanh nghiệp</label>${companies.map((company) => `<label class="company-option"><input type="checkbox" value="${escapeHtml(company)}" ${selectedCompanies === 'all' || selectedCompanies.includes(company) ? 'checked' : ''}>${escapeHtml(company)}</label>`).join('')}`;
+  $('#analysisCompanySummary').textContent = selectedCompanies === 'all' ? 'Tất cả doanh nghiệp' : selectedCompanies.length === 0 ? 'Chọn doanh nghiệp' : selectedCompanies.length === 1 ? selectedCompanies[0] : `${selectedCompanies.length} doanh nghiệp đã chọn`;
   const alertTags = [...new Set(STATE.rows.flatMap((row) => riskTagsFor(row)))].sort();
   populateSelect($('#alertTag'), ['all', ...alertTags], $('#alertTag').value || 'all', (tag) => tag === 'all' ? 'Tất cả nhãn' : (TAG_LABELS[tag] || tag));
   renderChatSuggestions();
@@ -343,7 +345,8 @@ function barChart(items, unit) {
 }
 
 function kpiCard(title, value, meta, icon, unavailable = false, change = '') {
-  return `<article class="kpi-card${unavailable ? ' unavailable' : ''}">
+  const optional = ['Tổng doanh thu', 'Lợi nhuận sau thuế', 'Tổng tài sản', 'Tổng nợ / nợ vay', 'CFO tuyệt đối'].includes(title);
+  return `<article class="kpi-card${unavailable ? ' unavailable' : ''}${optional ? ' optional-kpi' : ''}">
     <div class="kpi-top"><span>${escapeHtml(title)}</span><span class="kpi-icon">${escapeHtml(icon)}</span></div>
     <div class="kpi-value">${escapeHtml(value)}</div><div class="kpi-meta">${escapeHtml(meta)}${change}</div>
   </article>`;
@@ -399,6 +402,7 @@ function renderDashboard() {
   kpis.push(kpiCard('Cảnh báo rủi ro', String(flaggedCount), `${currentLabel} · mức từ trung bình (CSV)`, '!', false));
   kpis.push(kpiCard('Doanh nghiệp có dữ liệu', String(new Set(groupRows.map((row) => row.company_id)).size), `Trên ${groupRows.length} bản ghi tại kỳ ${latestYear ?? '—'}`, '▦', false));
   $('#kpiGrid').innerHTML = kpis.join('');
+  $('#kpiGrid').classList.toggle('show-extra', STATE.showExtraKpis);
   $('#scopeNote').textContent = `Phạm vi Dashboard: ${filters.company === 'all' ? 'tất cả doanh nghiệp' : filters.company} · ${filters.year === 'all' ? 'tất cả các năm' : `năm ${filters.year}`}. Biểu đồ tỷ lệ dùng trung vị theo kỳ; dữ liệu thiếu không được coi là 0.`;
   const series = ['gross_margin_pct', 'operating_margin_pct', 'net_margin_pct'].filter((key) => STATE.metrics.includes(key)).map((key, index) => ({
     metric: key, name: METRICS[key].label, color: ['#168f86', '#6f91a6', '#d19543'][index],
@@ -1191,45 +1195,6 @@ function addChatResponse(question, answer, metadata = {}) {
   body.innerHTML = renderChatMarkdown(answer);
   message.append(body);
 
-  if (metadata.status !== 'llm') {
-    const errorNote = document.createElement('div');
-    errorNote.className = 'chat-error-note';
-    errorNote.textContent = chatFailureMessage(metadata.reason);
-    message.append(errorNote);
-  }
-
-  const scope = document.createElement('div');
-  scope.className = 'chat-evidence';
-  const trace = metadata.source_trace || {};
-  const tracedFields = Array.isArray(trace.fields_sent) ? trace.fields_sent : [];
-  const company = question.match(/\bc\s*0?(\d{1,3})\b/i)?.[0]?.replace(/\s+/g, '').toUpperCase();
-  const year = question.match(/\b20\d{2}\b/)?.[0];
-  const fields = STATE.metrics.filter((key) => answer.includes(key) || answer.includes(METRICS[key]?.label || key));
-  scope.textContent = `Dữ liệu nguồn cho phân tích: ${trace.source_file || STATE.sourceName}${tracedFields.length ? ` · cột gửi ${tracedFields.join(', ')}` : fields.length ? ` · chỉ tiêu nhắc đến ${fields.join(', ')}` : ''}${company ? ` · mã được hỏi ${company}` : ''}${year ? ` · kỳ được hỏi ${year}` : ''}. Phần nhận xét là diễn giải AI trên dữ liệu đã chọn; CSV hiện có là bảng tổng hợp, chưa đối chiếu độc lập với báo cáo gốc.`;
-  message.append(scope);
-
-  const traceRecords = Array.isArray(trace.records) ? trace.records : [];
-  const traceCompanies = [...new Set(traceRecords.map((record) => record.company_id).filter(Boolean))];
-  const traceYears = [...new Set(traceRecords.map((record) => record.fiscal_year).filter(Boolean))];
-  const detail = document.createElement('div');
-  detail.className = 'chat-trace';
-  if (metadata.status === 'llm') {
-    const status = document.createElement('span');
-    status.className = 'chat-status-llm';
-    status.textContent = `LLM · ${metadata.provider || 'OpenAI'} · ${metadata.model || 'model chưa rõ'}`;
-    detail.append(status);
-    detail.append(document.createTextNode(` · ${Number.isFinite(metadata.latency_ms) ? `${metadata.latency_ms} ms` : ''}${metadata.upstream_request_id ? ` · OpenAI request ${metadata.upstream_request_id}` : metadata.request_id ? ` · request ${metadata.request_id}` : ''}`));
-  } else {
-    const reasonText = ({ missing_api_key: 'chưa cấu hình API key', missing_openai_dependency: 'chưa cài dependency backend', upstream_timeout: 'hết thời gian chờ', upstream_rate_limited: 'API giới hạn tần suất', upstream_error: 'API/backend lỗi', upstream_unavailable: 'dịch vụ AI không khả dụng', authentication_failed: 'không xác thực được API key', unsupported_provider: 'nhà cung cấp chưa hỗ trợ', cross_origin_denied: 'backend từ chối kết nối', network_error: 'mất kết nối', empty_model_response: 'phản hồi rỗng', rate_limited: 'quá giới hạn lượt gọi', payload_too_large: 'yêu cầu quá lớn', invalid_data_context: 'dữ liệu chưa hợp lệ' })[metadata.reason] || 'backend chưa khả dụng';
-    const status = document.createElement('span');
-    status.className = 'chat-status-fallback';
-    status.textContent = `Dự phòng cục bộ · ${reasonText}`;
-    detail.append(status);
-  }
-  const fieldsSent = Array.isArray(trace.fields_sent) && trace.fields_sent.length ? ` · trường gửi: ${trace.fields_sent.join(', ')}` : '';
-  detail.append(document.createTextNode(`Nguồn ${trace.source_file || STATE.sourceName} · ${traceRecords.length} dòng${traceCompanies.length ? ` · ${traceCompanies.join(', ')}` : ''}${traceYears.length ? ` · năm ${traceYears.join(', ')}` : ''}${fieldsSent}${trace.selection_note ? ` · ${trace.selection_note}` : ''}`));
-  message.append(detail);
-
   const controls = document.createElement('div');
   controls.className = 'chat-feedback';
   controls.setAttribute('aria-label', 'Đánh giá câu trả lời');
@@ -1332,6 +1297,12 @@ function initInteractions() {
       STATE.filters.analysis.companies = next.length === sortedCompanies().length ? 'all' : next;
     }
     configureSelectors(); renderAnalysis();
+  });
+  $('#toggleExtraKpis').addEventListener('click', () => {
+    STATE.showExtraKpis = !STATE.showExtraKpis;
+    $('#kpiGrid').classList.toggle('show-extra', STATE.showExtraKpis);
+    $('#toggleExtraKpis').setAttribute('aria-expanded', String(STATE.showExtraKpis));
+    $('#toggleExtraKpis').textContent = STATE.showExtraKpis ? 'Ẩn chỉ tiêu bổ sung' : 'Hiện chỉ tiêu bổ sung';
   });
   $('#comparisonMetric').addEventListener('change', renderComparison);
   $('#forecastMetric').addEventListener('change', renderForecast);

@@ -198,6 +198,9 @@ td:first-child { color: #354b59; font-weight: 600; }
 .reset-filters { flex: none; white-space: nowrap; }
 .load-error { margin: 22px 34px 0; padding: 16px; border: 1px solid #f0c8c6; border-radius: 9px; color: #963c40; background: #fff3f2; font-size: 13.8px; line-height: 1.6; }
 .hidden { display: none !important; }
+.kpi-toggle-button { align-self: end; min-height: 36px; white-space: nowrap; }
+.optional-kpi { display: none; }
+#kpiGrid.show-extra .optional-kpi { display: block; }
 
 /* Compact brand header and horizontal primary navigation. */
 .app-shell { display: flex; flex-direction: column; }
@@ -383,6 +386,7 @@ th { font-size: 11.5px; }
   .compare-chart-panel .panel-heading { align-items: stretch; flex-direction: column; }
   .compare-chart-panel .mini-select, .compare-chart-panel .mini-select select { width: 100%; }
   .filter-panel { align-items: stretch; flex-direction: column; }
+  .kpi-toggle-button { align-self: flex-start; }
   .field-label { width: 100%; }
   .company-multiselect details, .screen-filters .field-label { width: 100%; }
   .industry-notice { margin-left: 0; }

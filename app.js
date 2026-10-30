@@ -52,7 +52,7 @@ const GROUP_MEAN_METRICS = new Set([
   'current_ratio_x', 'debt_to_assets_pct', 'cfo_margin_pct', 'cfo_to_net_income_x',
   'free_cash_flow_vnd_mn'
 ]);
-const STATE = { rows: [], headers: [], sourceName: 'submission_output.csv', metrics: [], page: 'dashboard', filters: { dashboard: { company: 'all', year: 'all' }, analysis: { companies: 'all', year: 'all' }, comparison: { year: 'all' }, forecast: { company: 'all', year: 'all' }, alerts: { company: 'all', year: 'all' }, data: { company: 'all', year: 'all' } } };
+const STATE = { rows: [], headers: [], sourceName: 'submission_output.csv', metrics: [], page: 'dashboard', whatIfLog: [], filters: { dashboard: { company: 'all', year: 'all' }, analysis: { companies: 'all', year: 'all' }, comparison: { year: 'all' }, forecast: { company: 'all', year: 'all' }, whatIf: { company: 'all', year: 'all' }, alerts: { company: 'all', year: 'all' }, data: { company: 'all', year: 'all' } } };
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -197,8 +197,8 @@ function populateSelect(select, items, selected, labelFn = (item) => item) {
 function configureSelectors() {
   const companies = sortedCompanies();
   const years = sortedYears();
-  [['dashboardCompany','dashboard'],['forecastCompany','forecast'],['alertCompany','alerts'],['dataCompany','data']].forEach(([id, key]) => populateSelect($(`#${id}`), ['all', ...companies], STATE.filters[key].company, (company) => company === 'all' ? 'Tất cả doanh nghiệp' : company));
-  [['dashboardYear','dashboard'],['analysisYear','analysis'],['comparisonYear','comparison'],['forecastYear','forecast'],['alertYear','alerts'],['dataYear','data']].forEach(([id, key]) => populateSelect($(`#${id}`), ['all', ...years], STATE.filters[key].year, (year) => year === 'all' ? 'Tất cả các năm' : `Năm ${year}`));
+  [['dashboardCompany','dashboard'],['forecastCompany','forecast'],['whatIfCompany','whatIf'],['alertCompany','alerts'],['dataCompany','data']].forEach(([id, key]) => populateSelect($(`#${id}`), ['all', ...companies], STATE.filters[key].company, (company) => company === 'all' ? 'Tất cả doanh nghiệp' : company));
+  [['dashboardYear','dashboard'],['analysisYear','analysis'],['comparisonYear','comparison'],['forecastYear','forecast'],['whatIfYear','whatIf'],['alertYear','alerts'],['dataYear','data']].forEach(([id, key]) => populateSelect($(`#${id}`), ['all', ...years], STATE.filters[key].year, (year) => year === 'all' ? 'Tất cả các năm' : `Năm ${year}`));
   const metricChoices = STATE.metrics.filter((key) => key !== 'risk_score');
   const options = metricChoices.map((key) => ({ key, label: METRICS[key].label }));
   ['analysisMetric', 'comparisonMetric', 'forecastMetric'].forEach((selector, index) => {
@@ -463,6 +463,45 @@ function linearFit(points) {
   return { slope, intercept: meanY - slope * meanX, predict: (year) => (meanY - slope * meanX) + slope * year };
 }
 
+function rollingOriginEvaluation(points, minimumTraining = 3) {
+  const modelErrors = [];
+  const persistenceErrors = [];
+  const modelPercentErrors = [];
+  const persistencePercentErrors = [];
+  for (let index = minimumTraining; index < points.length; index += 1) {
+    const training = points.slice(0, index);
+    const actual = points[index].value;
+    const fit = linearFit(training);
+    if (!fit || !Number.isFinite(actual)) continue;
+    const predicted = fit.predict(points[index].x);
+    const baseline = training[training.length - 1].value;
+    if (!Number.isFinite(predicted) || !Number.isFinite(baseline)) continue;
+    const modelError = Math.abs(predicted - actual);
+    const persistenceError = Math.abs(baseline - actual);
+    modelErrors.push(modelError);
+    persistenceErrors.push(persistenceError);
+    if (actual !== 0) {
+      modelPercentErrors.push(modelError / Math.abs(actual) * 100);
+      persistencePercentErrors.push(persistenceError / Math.abs(actual) * 100);
+    }
+  }
+  const average = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  return {
+    periods: modelErrors.length,
+    modelMae: average(modelErrors),
+    persistenceMae: average(persistenceErrors),
+    modelMape: average(modelPercentErrors),
+    persistenceMape: average(persistencePercentErrors),
+    mapePeriods: modelPercentErrors.length
+  };
+}
+
+function forecastErrorDisplay(metric, value) {
+  if (value === null) return 'không tính được';
+  if (METRICS[metric]?.unit === '%') return `${formatNumber(value, METRICS[metric].decimals)} điểm %`;
+  return metricDisplay(metric, value);
+}
+
 function renderForecast() {
   const metric = $('#forecastMetric').value;
   const filters = STATE.filters.forecast;
@@ -496,6 +535,7 @@ function renderForecast() {
   const holdoutFit = linearFit(points.slice(0, -1));
   const last = points[points.length - 1];
   const holdoutError = holdoutFit ? Math.abs(holdoutFit.predict(last.x) - last.value) : null;
+  const evaluation = rollingOriginEvaluation(points);
   const predicted = fit.predict(nextYear);
   const forecastPoints = [...points, { x: nextYear, value: predicted, label: `Ước tính ${nextYear}: ${metricDisplay(metric, predicted)}` }];
   const actualSeries = { metric, name: 'Lịch sử thực tế', color: '#168f86', points };
@@ -506,7 +546,11 @@ function renderForecast() {
   const changePct = last.value === 0 ? null : ((predicted - last.value) / Math.abs(last.value)) * 100;
   const direction = Math.abs(predicted - last.value) <= Math.max(Math.abs(last.value) * 0.01, 10 ** -(METRICS[metric]?.decimals ?? 1)) ? 'đi ngang tương đối' : predicted > last.value ? 'tăng' : 'giảm';
   $('#forecastResult').innerHTML = `<strong>Nhận định dự báo · ${escapeHtml(company)} · ${escapeHtml(METRICS[metric]?.label || metric)} · năm ${nextYear}</strong><br>Xu hướng ngoại suy ${direction}. Năm ${nextYear}: <span class="forecast-number">${escapeHtml(metricDisplay(metric, predicted))}</span>${changePct === null ? ' (không tính phần trăm thay đổi vì kỳ gần nhất bằng 0).' : `; thay đổi ${changePct > 0 ? '+' : ''}${formatNumber(changePct, 1)}% so với năm ${last.x}.`} Phương pháp hồi quy tuyến tính trên ${points.length} kỳ thực tế.`;
-  $('#forecastDetails').textContent = `Kiểm tra giữ lại 1 kỳ: sai số tuyệt đối tại ${last.x} là ${holdoutError === null ? 'không tính được' : metricDisplay(metric, holdoutError)}. Ngoại suy giả định xu hướng tuyến tính tiếp tục; chỉ 1 kỳ kiểm tra không đủ để khẳng định độ chính xác. Giá trị sau năm ${last.x} là dự báo, không phải số liệu thực tế. Nguồn lịch sử: ${STATE.sourceName}, cột ${metric}, ${company}.`;
+  const mapeDetail = evaluation.mapePeriods ? `; MAPE hồi quy ${formatNumber(evaluation.modelMape, 1)}% / baseline persistence ${formatNumber(evaluation.persistenceMape, 1)}% (${evaluation.mapePeriods} kỳ khác 0)` : '; MAPE không tính được vì các kỳ kiểm tra đều bằng 0';
+  const evaluationDetail = evaluation.periods
+    ? `Rolling-origin 1 bước với tối thiểu 3 kỳ huấn luyện: ${evaluation.periods} kỳ kiểm tra; MAE hồi quy ${forecastErrorDisplay(metric, evaluation.modelMae)}; MAE baseline giữ nguyên kỳ gần nhất ${forecastErrorDisplay(metric, evaluation.persistenceMae)}${mapeDetail}. `
+    : 'Không có kỳ holdout rolling-origin sau tối thiểu 3 kỳ huấn luyện. ';
+  $('#forecastDetails').textContent = `${evaluationDetail}Kiểm tra giữ lại kỳ gần nhất ${last.x}: sai số tuyệt đối ${holdoutError === null ? 'không tính được' : forecastErrorDisplay(metric, holdoutError)}. Kết quả backtest chỉ mô tả các kỳ quan sát được, không khẳng định độ chính xác tổng quát. Giá trị sau năm ${last.x} là dự báo, không phải số liệu thực tế. Nguồn lịch sử: ${STATE.sourceName}, cột ${metric}, ${company}.`;
   $('#forecastChart').innerHTML = lineChart([actualSeries, forecastSeries], METRICS[metric]?.unit, { aria: 'Lịch sử và ước tính tuyến tính' });
 }
 
@@ -616,6 +660,100 @@ function renderData() {
   $('#qualityChecks').innerHTML = checks.map((item) => `<div class="quality-item"><span class="check${item.ok ? '' : ' warn'}">${item.ok ? '✓' : '!'}</span><span>${escapeHtml(item.text)}</span></div>`).join('');
 }
 
+const WHAT_IF_METRICS = [
+  ['revenue_growth_pct', 'Tăng trưởng doanh thu', 'shockRevenue'],
+  ['gross_margin_pct', 'Biên lợi nhuận gộp', 'shockGrossMargin'],
+  ['cfo_margin_pct', 'Biên CFO', 'shockCfoMargin'],
+  ['debt_to_assets_pct', 'Nợ / tài sản', 'shockDebtAssets']
+];
+
+function renderWhatIf() {
+  const company = STATE.filters.whatIf.company;
+  const requestedYear = STATE.filters.whatIf.year;
+  const latestYear = requestedYear === 'all'
+    ? Math.max(...STATE.rows.filter((row) => row.company_id === company).map((row) => Number(row.fiscal_year)).filter(Number.isFinite))
+    : Number(requestedYear);
+  const row = company !== 'all' && Number.isFinite(latestYear) ? rowFor(company, latestYear) : null;
+  const body = $('#whatIfResults');
+  if (!body) return;
+  if (!row) {
+    $('#whatIfTitle').textContent = 'Chưa có kịch bản';
+    $('#whatIfTrace').textContent = 'Chọn một doanh nghiệp và một năm có trong CSV. Không dùng giá trị năm khác để thay thế.';
+    body.innerHTML = '<tr><td colspan="4" class="table-empty">Chưa có bản ghi công ty/năm phù hợp.</td></tr>';
+    return;
+  }
+  $('#whatIfTitle').textContent = `Kịch bản · ${company} · ${latestYear}`;
+  const results = WHAT_IF_METRICS.map(([key, label, inputId]) => {
+    const before = getNumber(row, key);
+    const shock = Number($(`#${inputId}`).value);
+    const after = before === null ? null : before + shock;
+    return { key, label, before, shock, after };
+  });
+  body.innerHTML = results.map(({ key, label, before, shock, after }) => `<tr>
+    <td>${escapeHtml(label)}</td>
+    <td class="what-if-table-number">${escapeHtml(metricDisplay(key, before))}</td>
+    <td class="what-if-table-number">${escapeHtml(formatNumber(shock, 1))} điểm %</td>
+    <td class="what-if-table-number">${escapeHtml(metricDisplay(key, after))}</td>
+  </tr>`).join('');
+  $('#whatIfTrace').textContent = `Nguồn: ${STATE.sourceName} · ${company} · ${latestYear}. Công thức: giá trị giả định = giá trị CSV + cú sốc điểm phần trăm. Giá trị thiếu vẫn để thiếu; không tính lại severity, health, risk score hoặc alert tags.`;
+}
+
+function runWhatIf() {
+  const company = STATE.filters.whatIf.company;
+  const year = STATE.filters.whatIf.year === 'all' ? null : Number(STATE.filters.whatIf.year);
+  if (company === 'all' || !year) {
+    $('#whatIfStatus').textContent = 'Chọn một doanh nghiệp và một năm cụ thể trước khi tính.';
+    return;
+  }
+  const row = rowFor(company, year);
+  if (!row) {
+    $('#whatIfStatus').textContent = 'Không có dòng dữ liệu phù hợp; chưa tạo nhật ký.';
+    renderWhatIf();
+    return;
+  }
+  const shocks = {};
+  for (const [key, , inputId] of WHAT_IF_METRICS) {
+    const raw = $(`#${inputId}`).value.trim();
+    const value = raw === '' ? 0 : Number(raw);
+    if (!Number.isFinite(value) || value < -100 || value > 100) {
+      $('#whatIfStatus').textContent = 'Mỗi cú sốc phải là số từ −100 đến 100 điểm phần trăm.';
+      return;
+    }
+    shocks[key] = value;
+  }
+  const createdAt = new Date().toISOString();
+  const entries = WHAT_IF_METRICS.map(([key, label]) => {
+    const before = getNumber(row, key);
+    const shock = shocks[key];
+    return {
+      created_at: createdAt, company_id: company, fiscal_year: year, source_file: STATE.sourceName,
+      metric: key, metric_label: label, source_field: key, before,
+      shock_percentage_points: shock, after: before === null ? null : before + shock,
+      formula: 'after = before + shock_percentage_points; null source remains null',
+      assumption: 'Sensitivity-only; no severity, health, risk score, or alert tag recalculation.'
+    };
+  });
+  STATE.whatIfLog.push(...entries);
+  $('#exportWhatIf').disabled = false;
+  $('#whatIfStatus').textContent = `Đã thêm ${entries.length} dòng giả định vào nhật ký (${STATE.whatIfLog.length} dòng).`;
+  renderWhatIf();
+}
+
+function exportWhatIfLog() {
+  if (!STATE.whatIfLog.length) return;
+  const columns = ['created_at','company_id','fiscal_year','source_file','metric','metric_label','source_field','before','shock_percentage_points','after','formula','assumption'];
+  const quote = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const content = [columns, ...STATE.whatIfLog.map((entry) => columns.map((column) => entry[column]))]
+    .map((line) => line.map(quote).join(',')).join('\r\n');
+  const blob = new Blob([`\uFEFF${content}`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'datalyst_what_if_audit.csv';
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function render() {
   configureSelectors();
   renderDashboard();
@@ -624,13 +762,186 @@ function render() {
   renderForecast();
   renderAlerts();
   renderData();
+  renderWhatIf();
+}
+
+function chatScopeForPage() {
+  if (STATE.page === 'forecast') return STATE.filters.forecast;
+  if (STATE.page === 'analysis') {
+    const selected = STATE.filters.analysis.companies;
+    return { company: selected === 'all' || selected.length !== 1 ? 'all' : selected[0], companies: selected, year: STATE.filters.analysis.year };
+  }
+  if (STATE.page === 'alerts') return STATE.filters.alerts;
+  if (STATE.page === 'comparison') return { company: 'all', year: STATE.filters.comparison.year };
+  if (STATE.page === 'whatIf') return STATE.filters.whatIf;
+  if (STATE.page === 'data') return STATE.filters.data;
+  return STATE.filters.dashboard;
+}
+
+function buildChatDataContext(question) {
+  const text = question.toLocaleLowerCase('vi');
+  const requestedCompany = question.match(/\bc\s*0?(\d{1,3})\b/i);
+  const active = chatScopeForPage();
+  const forecastIntent = /dự báo|dự đoán|ngoại suy|forecast/.test(text);
+  let company = requestedCompany ? `C${String(Number(requestedCompany[1])).padStart(3, '0')}` : (active.company || 'all');
+  if (!requestedCompany && forecastIntent && company === 'all') company = STATE.filters.forecast.company;
+  const selectedCompanies = !requestedCompany && Array.isArray(active.companies) ? active.companies : null;
+  const yearsInQuestion = [...question.matchAll(/\b(20\d{2})\b/g)].map((match) => Number(match[1]));
+  const requestedYear = yearsInQuestion.at(-1);
+  const activeYear = forecastIntent ? STATE.filters.forecast.year : active.year;
+  const endYear = requestedYear ?? (activeYear && activeYear !== 'all' ? Number(activeYear) : Infinity);
+  const trend = /qua các năm|xu hướng|thay đổi|diễn biến|biến động|giai đoạn|lịch sử/.test(text) || forecastIntent;
+  const scoped = STATE.rows.filter((row) => (company === 'all' || row.company_id === company) && (!selectedCompanies || selectedCompanies.includes(row.company_id)) && Number(row.fiscal_year) <= endYear);
+  let selectedRows;
+  if (forecastIntent && company === 'all') {
+    selectedRows = [];
+  } else if (company !== 'all' && trend) {
+    selectedRows = [...new Map(scoped.map((row) => [Number(row.fiscal_year), row])).values()]
+      .sort((left, right) => Number(left.fiscal_year) - Number(right.fiscal_year)).slice(-5);
+  } else {
+    const latestYear = requestedYear ?? (active.year && active.year !== 'all' ? Number(active.year) : Math.max(...scoped.map((row) => Number(row.fiscal_year))));
+    selectedRows = scoped.filter((row) => Number(row.fiscal_year) === latestYear).slice(0, 12);
+  }
+  const metricMap = [
+    ['revenue_growth_pct', /doanh thu|tăng trưởng/], ['gross_margin_pct', /biên gộp/],
+    ['operating_margin_pct', /biên hoạt động/], ['net_margin_pct', /biên lợi nhuận ròng|lợi nhuận/],
+    ['current_ratio_x', /thanh khoản|hiện hành/], ['quick_ratio_x', /thanh toán nhanh/],
+    ['debt_to_assets_pct', /nợ.*tài sản|đòn bẩy/], ['debt_to_equity_x', /nợ.*vốn chủ/],
+    ['roa_pct', /\broa\b/], ['roe_pct', /\broe\b/], ['cfo_margin_pct', /cfo|dòng tiền hoạt động/],
+    ['cfo_to_net_income_x', /cfo.*lợi nhuận|chuyển đổi.*tiền/],
+    ['free_cash_flow_vnd_mn', /fcf|dòng tiền tự do/], ['dso_days', /phải thu|dso/],
+    ['inventory_days', /tồn kho/], ['dpo_days', /phải trả|dpo/],
+    ['interest_coverage_x', /trả lãi|lãi vay/], ['working_capital_vnd_mn', /vốn lưu động/],
+    ['risk_score', /điểm rủi ro/]
+  ];
+  const selectedFields = metricMap.filter(([, pattern]) => pattern.test(text)).map(([key]) => key);
+  if (!selectedFields.length) selectedFields.push('revenue_growth_pct','operating_margin_pct','net_margin_pct','current_ratio_x','debt_to_assets_pct','cfo_margin_pct');
+  if (/cảnh báo|rủi ro|nguy cơ|evidence|bằng chứng/.test(text)) {
+    selectedFields.push('risk_score','predicted_primary_scenario','predicted_severity','predicted_overall_health','alert_tags','alert_reason');
+  }
+  const fields = [...new Set(selectedFields.filter((key) => STATE.headers.includes(key)))];
+  const records = selectedRows.map((row) => Object.fromEntries([
+    ['company_id', row.company_id], ['fiscal_year', Number(row.fiscal_year)],
+    ...fields.map((field) => [field, getNumber(row, field) ?? (row[field]?.trim() ? row[field].trim().slice(0, 500) : null)])
+  ]));
+  const years = [...new Set(records.map((row) => row.fiscal_year))];
+  const companies = [...new Set(records.map((row) => row.company_id))];
+  const derivedFacts = [];
+  if (company === 'all' && !trend && years.length === 1) {
+    for (const key of GROUP_MEAN_METRICS) {
+      if (!fields.includes(key)) continue;
+      const values = records.map((row) => getNumber(row, key)).filter((value) => value !== null);
+      if (values.length) derivedFacts.push({
+        type: 'group_mean', metric: key, metric_label: METRICS[key]?.label || key,
+        unit: METRICS[key]?.unit || '', year: years[0], observation_count: values.length,
+        value: mean(values), formula: 'arithmetic_mean_valid_same_year'
+      });
+    }
+    for (const key of fields.filter((field) => !GROUP_MEAN_METRICS.has(field) && records.some((row) => getNumber(row, field) !== null))) {
+      const values = records.map((row) => getNumber(row, key)).filter((value) => value !== null);
+      if (values.length) derivedFacts.push({
+        type: 'group_median', metric: key, metric_label: METRICS[key]?.label || key,
+        unit: METRICS[key]?.unit || '', year: years[0], observation_count: values.length,
+        value: median(values), formula: 'median_valid_same_year'
+      });
+    }
+  } else if (forecastIntent && company !== 'all') {
+    const requestedMetric = metricMap.find(([key, pattern]) => STATE.metrics.includes(key) && pattern.test(text))?.[0] || $('#forecastMetric').value;
+    const history = selectedRows.map((row) => ({ x: Number(row.fiscal_year), value: getNumber(row, requestedMetric) }))
+      .filter((point) => point.value !== null).sort((left, right) => left.x - right.x);
+    const continuous = history.every((point, index) => index === 0 || point.x - history[index - 1].x === 1);
+    if (history.length >= 4 && continuous) {
+      const fit = linearFit(history);
+      const last = history[history.length - 1];
+      const evaluation = rollingOriginEvaluation(history);
+      const prediction = fit?.predict(last.x + 1);
+      if (Number.isFinite(prediction)) derivedFacts.push({
+        type: 'linear_forecast', metric: requestedMetric, metric_label: METRICS[requestedMetric]?.label || requestedMetric,
+        unit: METRICS[requestedMetric]?.unit || '', history_years: history.map((point) => point.x),
+        last_year: last.x, last_value: last.value, forecast_year: last.x + 1, forecast_value: prediction,
+        formula: 'ordinary_least_squares_linear_trend', evaluation_periods: evaluation.periods,
+        rolling_origin_mae: evaluation.modelMae, persistence_mae: evaluation.persistenceMae,
+        rolling_origin_mape_pct: evaluation.modelMape, persistence_mape_pct: evaluation.persistenceMape,
+        mape_periods: evaluation.mapePeriods
+      });
+    }
+  } else if (trend && company !== 'all' && selectedFields.length) {
+    for (const key of fields) {
+      const values = selectedRows.map((row) => ({ year: Number(row.fiscal_year), value: getNumber(row, key) }))
+        .filter((point) => point.value !== null).sort((left, right) => left.year - right.year);
+      if (values.length > 1) derivedFacts.push({
+        type: 'trend_delta', metric: key, metric_label: METRICS[key]?.label || key, unit: METRICS[key]?.unit || '',
+        first_year: values[0].year, first_value: values[0].value,
+        last_year: values[values.length - 1].year, last_value: values[values.length - 1].value,
+        delta: values[values.length - 1].value - values[0].value, formula: 'last_value_minus_first_value'
+      });
+    }
+  }
+  const omittedDerivedFacts = Math.max(0, derivedFacts.length - 8);
+  const selectedDerivedFacts = derivedFacts.slice(0, 8);
+  let selectionNote = forecastIntent && company === 'all'
+    ? 'Dự báo cần chọn một doanh nghiệp cụ thể.'
+    : company === 'all' && selectedRows.length === 12
+      ? 'Tối đa 12 dòng được gửi cho câu hỏi theo nhóm.'
+      : trend ? 'Tối đa 5 kỳ gần nhất của một doanh nghiệp được gửi.' : 'Một kỳ báo cáo được gửi.';
+  if (omittedDerivedFacts) selectionNote += ` Giới hạn ${selectedDerivedFacts.length} facts tính toán, bỏ qua ${omittedDerivedFacts} facts còn lại.`;
+  return {
+    source_file: STATE.sourceName,
+    scope: {
+      company_id: company,
+      company_ids: selectedCompanies === 'all' ? null : selectedCompanies,
+      fiscal_year: years.length === 1 ? years[0] : null,
+      selection_note: selectionNote
+    },
+    records,
+    derived_facts: selectedDerivedFacts,
+    fields_sent: fields,
+    company_count: companies.length
+  };
+}
+
+async function checkBackendHealth() {
+  const status = $('#chatConnectionStatus');
+  if (!status) return;
+  try {
+    const response = await fetch('/api/health', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const health = await response.json();
+    status.textContent = health.configured
+      ? `Backend đã sẵn sàng · OpenAI ${health.model}. Nếu lỗi, câu trả lời dự phòng sẽ được ghi nhãn.`
+      : `Backend hoạt động · ${health.reason === 'missing_dependency' ? 'thiếu dependency OpenAI' : 'chưa cấu hình API key'}; câu trả lời dự phòng cục bộ sẽ được ghi nhãn.`;
+  } catch (_) {
+    status.textContent = 'Không kết nối được backend · câu trả lời dự phòng cục bộ sẽ được ghi nhãn.';
+  }
+}
+
+async function getAssistantAnswer(question) {
+  const context = buildChatDataContext(question);
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ question, data_context: context })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const code = payload?.detail?.code || `http_${response.status}`;
+      throw new Error(code);
+    }
+    return { answer: payload.answer, metadata: { status: 'llm', ...payload } };
+  } catch (error) {
+    const answer = answerChat(question);
+    return { answer, metadata: { status: 'fallback', reason: error.message || 'backend_unavailable', source_trace: {
+      source_file: context.source_file, scope: context.scope, fields_sent: context.fields_sent,
+      record_count: context.records.length, records: context.records.map(({ company_id, fiscal_year }) => ({ company_id, fiscal_year }))
+    } } };
+  }
 }
 
 function answerChat(question) {
   const text = question.toLocaleLowerCase('vi');
   const requestedCompany = text.match(/\bc\s*0?(\d{1,3})\b/i);
   const mentionedCompanies = [...text.matchAll(/\bc\s*0?(\d{1,3})\b/gi)].map((match) => `C${String(Number(match[1])).padStart(3, '0')}`);
-  const context = STATE.page === 'forecast' ? STATE.filters.forecast : STATE.page === 'analysis' ? STATE.filters.analysis : STATE.page === 'alerts' ? STATE.filters.alerts : STATE.page === 'comparison' ? STATE.filters.comparison : STATE.page === 'data' ? STATE.filters.data : STATE.filters.dashboard;
+  const context = STATE.page === 'forecast' ? STATE.filters.forecast : STATE.page === 'analysis' ? STATE.filters.analysis : STATE.page === 'whatIf' ? STATE.filters.whatIf : STATE.page === 'alerts' ? STATE.filters.alerts : STATE.page === 'comparison' ? STATE.filters.comparison : STATE.page === 'data' ? STATE.filters.data : STATE.filters.dashboard;
   const activeCompany = context.company || (Array.isArray(context.companies) && context.companies.length === 1 ? context.companies[0] : 'all');
   const company = requestedCompany ? `C${String(Number(requestedCompany[1])).padStart(3, '0')}` : activeCompany;
   const yearMatch = text.match(/\b(20\d{2})\b/);
@@ -789,7 +1100,7 @@ function readChatFeedback() {
   }
 }
 
-function addChatResponse(question, answer) {
+function addChatResponse(question, answer, metadata = {}) {
   const message = document.createElement('article');
   const responseId = `chat-response-${Date.now()}-${chatResponseSequence++}`;
   message.className = 'chat-message system chat-response';
@@ -808,6 +1119,29 @@ function addChatResponse(question, answer) {
   const fields = STATE.metrics.filter((key) => answer.includes(key) || answer.includes(METRICS[key]?.label || key));
   scope.textContent = `Nguồn kiểm tra: ${STATE.sourceName}${fields.length ? ` · cột ${fields.join(', ')}` : ''}${company ? ` · mã được hỏi ${company}` : ''}${year ? ` · kỳ được hỏi ${year}` : ''}. Nội dung truy xuất cục bộ từ CSV; trường không nêu ở đây chưa được xác minh độc lập với báo cáo gốc.`;
   message.append(scope);
+
+  const trace = metadata.source_trace || {};
+  const traceRecords = Array.isArray(trace.records) ? trace.records : [];
+  const traceCompanies = [...new Set(traceRecords.map((record) => record.company_id).filter(Boolean))];
+  const traceYears = [...new Set(traceRecords.map((record) => record.fiscal_year).filter(Boolean))];
+  const detail = document.createElement('div');
+  detail.className = 'chat-trace';
+  if (metadata.status === 'llm') {
+    const status = document.createElement('span');
+    status.className = 'chat-status-llm';
+    status.textContent = `LLM · ${metadata.provider || 'OpenAI'} · ${metadata.model || 'model chưa rõ'}`;
+    detail.append(status);
+    detail.append(document.createTextNode(` · ${Number.isFinite(metadata.latency_ms) ? `${metadata.latency_ms} ms` : ''}${metadata.upstream_request_id ? ` · OpenAI request ${metadata.upstream_request_id}` : metadata.request_id ? ` · request ${metadata.request_id}` : ''}`));
+  } else {
+    const reasonText = ({ missing_api_key: 'chưa cấu hình API key', missing_openai_dependency: 'chưa cài dependency backend', upstream_timeout: 'backend timeout', upstream_rate_limited: 'API giới hạn tần suất', upstream_error: 'API/backend lỗi', cross_origin_denied: 'request không cùng origin' })[metadata.reason] || 'backend chưa khả dụng';
+    const status = document.createElement('span');
+    status.className = 'chat-status-fallback';
+    status.textContent = `Dự phòng cục bộ · ${reasonText}`;
+    detail.append(status);
+  }
+  const fieldsSent = Array.isArray(trace.fields_sent) && trace.fields_sent.length ? ` · trường gửi: ${trace.fields_sent.join(', ')}` : '';
+  detail.append(document.createTextNode(`Nguồn ${trace.source_file || STATE.sourceName} · ${traceRecords.length} dòng${traceCompanies.length ? ` · ${traceCompanies.join(', ')}` : ''}${traceYears.length ? ` · năm ${traceYears.join(', ')}` : ''}${fieldsSent}${trace.selection_note ? ` · ${trace.selection_note}` : ''}`));
+  message.append(detail);
 
   const controls = document.createElement('div');
   controls.className = 'chat-feedback';
@@ -917,6 +1251,10 @@ function initInteractions() {
   $('#alertSeverity').addEventListener('change', renderAlerts);
   $('#alertTag').addEventListener('change', renderAlerts);
   $('#reloadButton').addEventListener('click', () => loadCsv());
+  $('#whatIfCompany').addEventListener('change', (event) => { STATE.filters.whatIf.company = event.target.value; renderWhatIf(); });
+  $('#whatIfYear').addEventListener('change', (event) => { STATE.filters.whatIf.year = event.target.value; renderWhatIf(); });
+  $('#runWhatIf').addEventListener('click', runWhatIf);
+  $('#exportWhatIf').addEventListener('click', exportWhatIfLog);
   $('#chatToggle').addEventListener('click', () => setChatOpen($('#chatWindow').classList.contains('hidden')));
   $('#chatClose').addEventListener('click', () => setChatOpen(false));
   $('#chatForm').addEventListener('submit', (event) => {
@@ -928,12 +1266,12 @@ function initInteractions() {
     input.value = '';
     addChatMessage('Đang tra cứu dữ liệu…', 'system');
     const pending = $('#chatMessages').lastElementChild;
-    window.setTimeout(() => {
-      let answer;
-      try { answer = answerChat(question); }
-      catch (error) { answer = `Không thể hoàn tất tra cứu: ${error.message || 'Lỗi xử lý dữ liệu.'} Hãy thử câu hỏi khác hoặc kiểm tra CSV.`; }
+    window.setTimeout(async () => {
+      let result;
+      try { result = await getAssistantAnswer(question); }
+      catch (error) { result = { answer: `Không thể hoàn tất tra cứu: ${error.message || 'Lỗi xử lý dữ liệu.'} Hãy thử câu hỏi khác hoặc kiểm tra CSV.`, metadata: { status: 'fallback', reason: 'local_error' } }; }
       pending.remove();
-      addChatResponse(question, answer);
+      addChatResponse(question, result.answer, result.metadata);
       $('#chatMessages').scrollTop = $('#chatMessages').scrollHeight;
     }, 220);
   });
@@ -996,5 +1334,6 @@ function initInteractions() {
 document.addEventListener('DOMContentLoaded', () => {
   startVietnamClock();
   initInteractions();
+  checkBackendHealth();
   loadCsv();
 });

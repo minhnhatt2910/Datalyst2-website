@@ -79,7 +79,7 @@ class ApiTests(unittest.TestCase):
         with patch.object(server, "_client", fake_client), patch.object(server, "APIConnectionError", FakeConnectionError):
             response = self.client.post("/api/chat", json=self.payload())
         self.assertEqual(response.status_code, 502)
-        self.assertEqual(response.json()["detail"]["code"], "upstream_error")
+        self.assertEqual(response.json()["detail"]["code"], "upstream_unavailable")
 
     def test_cross_origin_and_oversized_requests_are_rejected(self):
         cross_origin = self.client.post("/api/chat", json=self.payload(), headers={"Origin": "https://attacker.example"})

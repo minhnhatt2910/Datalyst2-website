@@ -54,6 +54,10 @@ const GROUP_MEAN_METRICS = new Set([
 ]);
 const STATE = { rows: [], headers: [], sourceName: 'submission_output.csv', metrics: [], page: 'dashboard', whatIfLog: [], filters: { dashboard: { company: 'all', year: 'all' }, analysis: { companies: 'all', year: 'all' }, comparison: { year: 'all' }, forecast: { company: 'all', year: 'all' }, whatIf: { company: 'all', year: 'all' }, alerts: { company: 'all', year: 'all' }, data: { company: 'all', year: 'all' } } };
 const $ = (selector) => document.querySelector(selector);
+const apiUrl = (path) => {
+  const base = $('meta[name="datalyst-api-base"]')?.content.trim().replace(/\/+$/, '') || '';
+  return `${base}/api/${path}`;
+};
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 })[char]);
@@ -783,6 +787,8 @@ function buildChatDataContext(question) {
   const requestedCompany = question.match(/\bc\s*0?(\d{1,3})\b/i);
   const active = chatScopeForPage();
   const forecastIntent = /dự báo|dự đoán|ngoại suy|forecast/.test(text);
+  const peerIntent = /so với|so sánh|benchmark|cùng ngành|ngành/.test(text);
+  const insightIntent = /tổng quan|tình hình|sức khỏe|đánh giá|phân tích|insight|tín hiệu|đáng chú ý|cảnh báo|rủi ro/.test(text);
   let company = requestedCompany ? `C${String(Number(requestedCompany[1])).padStart(3, '0')}` : (active.company || 'all');
   if (!requestedCompany && forecastIntent && company === 'all') company = STATE.filters.forecast.company;
   const selectedCompanies = !requestedCompany && Array.isArray(active.companies) ? active.companies : null;
@@ -790,10 +796,15 @@ function buildChatDataContext(question) {
   const requestedYear = yearsInQuestion.at(-1);
   const activeYear = forecastIntent ? STATE.filters.forecast.year : active.year;
   const endYear = requestedYear ?? (activeYear && activeYear !== 'all' ? Number(activeYear) : Infinity);
-  const trend = /qua các năm|xu hướng|thay đổi|diễn biến|biến động|giai đoạn|lịch sử/.test(text) || forecastIntent;
+  const trend = /qua các năm|xu hướng|thay đổi|diễn biến|biến động|giai đoạn|lịch sử/.test(text) || forecastIntent || (insightIntent && company !== 'all' && !peerIntent);
   const scoped = STATE.rows.filter((row) => (company === 'all' || row.company_id === company) && (!selectedCompanies || selectedCompanies.includes(row.company_id)) && Number(row.fiscal_year) <= endYear);
+  const peerRows = peerIntent && company !== 'all'
+    ? rowsAtYear(requestedYear ?? (active.year && active.year !== 'all' ? Number(active.year) : Math.max(...STATE.rows.map((row) => Number(row.fiscal_year)))))
+    : [];
   let selectedRows;
-  if (forecastIntent && company === 'all') {
+  if (peerRows.length) {
+    selectedRows = peerRows.slice(0, 12);
+  } else if (forecastIntent && company === 'all') {
     selectedRows = [];
   } else if (company !== 'all' && trend) {
     selectedRows = [...new Map(scoped.map((row) => [Number(row.fiscal_year), row])).values()]
@@ -815,8 +826,9 @@ function buildChatDataContext(question) {
     ['risk_score', /điểm rủi ro/]
   ];
   const selectedFields = metricMap.filter(([, pattern]) => pattern.test(text)).map(([key]) => key);
+  if (insightIntent || peerIntent) selectedFields.push(...metricMap.map(([key]) => key));
   if (!selectedFields.length) selectedFields.push('revenue_growth_pct','operating_margin_pct','net_margin_pct','current_ratio_x','debt_to_assets_pct','cfo_margin_pct');
-  if (/cảnh báo|rủi ro|nguy cơ|evidence|bằng chứng/.test(text)) {
+  if (/cảnh báo|rủi ro|nguy cơ|evidence|bằng chứng|tổng quan|tình hình|sức khỏe|đánh giá|phân tích|tín hiệu|đáng chú ý/.test(text)) {
     selectedFields.push('risk_score','predicted_primary_scenario','predicted_severity','predicted_overall_health','alert_tags','alert_reason');
   }
   const fields = [...new Set(selectedFields.filter((key) => STATE.headers.includes(key)))];
@@ -827,7 +839,7 @@ function buildChatDataContext(question) {
   const years = [...new Set(records.map((row) => row.fiscal_year))];
   const companies = [...new Set(records.map((row) => row.company_id))];
   const derivedFacts = [];
-  if (company === 'all' && !trend && years.length === 1) {
+  if ((company === 'all' || peerRows.length > 0) && !trend && years.length === 1) {
     for (const key of GROUP_MEAN_METRICS) {
       if (!fields.includes(key)) continue;
       const values = records.map((row) => getNumber(row, key)).filter((value) => value !== null);
@@ -877,19 +889,21 @@ function buildChatDataContext(question) {
       });
     }
   }
-  const omittedDerivedFacts = Math.max(0, derivedFacts.length - 8);
-  const selectedDerivedFacts = derivedFacts.slice(0, 8);
+  const omittedDerivedFacts = Math.max(0, derivedFacts.length - 24);
+  const selectedDerivedFacts = derivedFacts.slice(0, 24);
   let selectionNote = forecastIntent && company === 'all'
     ? 'Dự báo cần chọn một doanh nghiệp cụ thể.'
-    : company === 'all' && selectedRows.length === 12
-      ? 'Tối đa 12 dòng được gửi cho câu hỏi theo nhóm.'
+    : peerRows.length
+      ? 'Đối chiếu công ty được hỏi với nhóm company-year cùng kỳ trong Data Pack; đây là nhóm tham chiếu giả lập, không phải benchmark toàn thị trường.'
+      : company === 'all' && selectedRows.length === 12
+        ? 'Tối đa 12 dòng được gửi cho câu hỏi theo nhóm; nhóm tham chiếu gồm các doanh nghiệp giả lập cùng phân ngành trong Data Pack.'
       : trend ? 'Tối đa 5 kỳ gần nhất của một doanh nghiệp được gửi.' : 'Một kỳ báo cáo được gửi.';
   if (omittedDerivedFacts) selectionNote += ` Giới hạn ${selectedDerivedFacts.length} facts tính toán, bỏ qua ${omittedDerivedFacts} facts còn lại.`;
   return {
     source_file: STATE.sourceName,
     scope: {
-      company_id: company,
-      company_ids: selectedCompanies === 'all' ? null : selectedCompanies,
+      company_id: peerRows.length ? 'all' : company,
+      company_ids: peerRows.length ? companies : selectedCompanies === 'all' ? null : selectedCompanies,
       fiscal_year: years.length === 1 ? years[0] : null,
       selection_note: selectionNote
     },
@@ -904,11 +918,11 @@ async function checkBackendHealth() {
   const status = $('#chatConnectionStatus');
   if (!status) return;
   try {
-    const response = await fetch('/api/health', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const response = await fetch(apiUrl('health'), { headers: { Accept: 'application/json' }, cache: 'no-store' });
     const health = await response.json();
     status.textContent = health.configured
-      ? `Backend đã sẵn sàng · OpenAI ${health.model}. Nếu lỗi, câu trả lời dự phòng sẽ được ghi nhãn.`
-      : `Backend hoạt động · ${health.reason === 'missing_dependency' ? 'thiếu dependency OpenAI' : 'chưa cấu hình API key'}; câu trả lời dự phòng cục bộ sẽ được ghi nhãn.`;
+      ? `Backend đã cấu hình · ${health.provider || 'OpenAI'} ${health.model}. Nếu lỗi, câu trả lời dự phòng sẽ được ghi nhãn.`
+      : `Backend hoạt động · ${{ missing_dependency: 'thiếu dependency OpenAI', missing_openai_dependency: 'thiếu dependency OpenAI', unsupported_provider: 'nhà cung cấp chưa được hỗ trợ', missing_api_key: 'chưa cấu hình API key' }[health.reason] || 'chưa sẵn sàng'}; câu trả lời dự phòng cục bộ sẽ được ghi nhãn.`;
   } catch (_) {
     status.textContent = 'Không kết nối được backend · câu trả lời dự phòng cục bộ sẽ được ghi nhãn.';
   }
@@ -916,25 +930,90 @@ async function checkBackendHealth() {
 
 async function getAssistantAnswer(question) {
   const context = buildChatDataContext(question);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 30000);
   try {
-    const response = await fetch('/api/chat', {
+    const response = await fetch(apiUrl('chat'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ question, data_context: context })
+      body: JSON.stringify({ question, data_context: context }),
+      signal: controller.signal
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       const code = payload?.detail?.code || `http_${response.status}`;
       throw new Error(code);
     }
-    return { answer: payload.answer, metadata: { status: 'llm', ...payload } };
+    if (typeof payload.answer !== 'string' || !payload.answer.trim()) throw new Error('empty_model_response');
+    return { answer: payload.answer.trim(), metadata: { status: 'llm', ...payload } };
   } catch (error) {
     const answer = answerChat(question);
-    return { answer, metadata: { status: 'fallback', reason: error.message || 'backend_unavailable', source_trace: {
+    const reason = error.name === 'AbortError' ? 'upstream_timeout' : error instanceof TypeError ? 'network_error' : error.message || 'backend_unavailable';
+    return { answer, metadata: { status: 'fallback', reason, source_trace: {
       source_file: context.source_file, scope: context.scope, fields_sent: context.fields_sent,
       record_count: context.records.length, records: context.records.map(({ company_id, fiscal_year }) => ({ company_id, fiscal_year }))
     } } };
+  } finally {
+    window.clearTimeout(timeout);
   }
+}
+
+function renderChatMarkdown(markdown) {
+  const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+  const inline = (value) => escape(value)
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
+    .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
+    .replace(/\$\$(.+?)\$\$/g, '<span class="chat-formula">$1</span>')
+    .replace(/\\\((.+?)\\\)/g, '<span class="chat-formula">$1</span>')
+    .replace(/\\\[(.+?)\\\]/g, '<span class="chat-formula">$1</span>');
+  const lines = String(markdown || '').replace(/\r/g, '').split('\n');
+  const html = [];
+  let paragraph = [], listType = '', listItems = [], tableRows = [];
+  const flushParagraph = () => { if (paragraph.length) { html.push(`<p>${inline(paragraph.join(' '))}</p>`); paragraph = []; } };
+  const flushList = () => { if (listItems.length) { html.push(`<${listType}>${listItems.map((item) => `<li>${inline(item)}</li>`).join('')}</${listType}>`); listItems = []; listType = ''; } };
+  const flushTable = () => {
+    if (!tableRows.length) return;
+    const cells = tableRows.map((row) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim()));
+    const isDivider = (row) => row.every((cell) => /^:?-{3,}:?$/.test(cell));
+    const header = cells.shift() || [];
+    const bodyRows = cells[0] && isDivider(cells[0]) ? cells.slice(1) : cells;
+    html.push(`<div class="chat-table-wrap"><table><thead><tr>${header.map((cell) => `<th>${inline(cell)}</th>`).join('')}</tr></thead><tbody>${bodyRows.map((row) => `<tr>${header.map((_, index) => `<td>${inline(row[index] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+    tableRows = [];
+  };
+  for (const line of lines) {
+    if (/^\s*\|.*\|\s*$/.test(line)) { flushParagraph(); flushList(); tableRows.push(line); continue; }
+    flushTable();
+    const heading = line.match(/^\s{0,3}(#{1,4})\s+(.+)$/);
+    const item = line.match(/^\s*(?:[-*+]\s+|\d+[.)]\s+)(.*)$/);
+    if (heading) { flushParagraph(); flushList(); const level = Math.min(heading[1].length + 1, 5); html.push(`<h${level}>${inline(heading[2])}</h${level}>`); }
+    else if (item) { flushParagraph(); const type = /^\s*\d/.test(line) ? 'ol' : 'ul'; if (listType && type !== listType) flushList(); listType = type; listItems.push(item[1]); }
+    else if (!line.trim()) { flushParagraph(); flushList(); }
+    else { flushList(); paragraph.push(line.trim()); }
+  }
+  flushParagraph(); flushList(); flushTable();
+  return html.join('');
+}
+
+function chatFailureMessage(reason) {
+  const messages = {
+    missing_api_key: 'AI chưa được cấu hình khóa API trên backend. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.',
+    missing_openai_dependency: 'Backend chưa cài thư viện kết nối AI. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.',
+    unsupported_provider: 'Nhà cung cấp AI chưa được hỗ trợ trong backend. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.',
+    authentication_failed: 'Backend không xác thực được với dịch vụ AI. Kiểm tra khóa API trong biến môi trường; câu trả lời dưới đây dùng dự phòng cục bộ.',
+    upstream_unavailable: 'Dịch vụ AI hiện không khả dụng. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.',
+    upstream_timeout: 'Backend hoặc dịch vụ AI phản hồi quá lâu. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.',
+    upstream_rate_limited: 'Dịch vụ AI đang giới hạn lượt gọi. Vui lòng thử lại sau; câu trả lời dưới đây dùng dự phòng cục bộ.',
+    rate_limited: 'Bạn đã gửi nhiều yêu cầu trong thời gian ngắn. Vui lòng chờ một chút; câu trả lời dưới đây dùng dự phòng cục bộ.',
+    upstream_error: 'Dịch vụ AI đang gặp lỗi. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.',
+    network_error: 'Không kết nối được backend AI. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.',
+    empty_model_response: 'AI trả về nội dung trống. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.',
+    invalid_data_context: 'Không thể xác thực phần dữ liệu được chọn. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.',
+    payload_too_large: 'Yêu cầu vượt giới hạn dữ liệu cho phép. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.',
+    cross_origin_denied: 'Backend từ chối nguồn kết nối hiện tại. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.'
+  };
+  return messages[reason] || 'Backend AI chưa khả dụng. Câu trả lời dưới đây dùng dữ liệu và quy tắc dự phòng cục bộ.';
 }
 
 function answerChat(question) {
@@ -1109,18 +1188,26 @@ function addChatResponse(question, answer, metadata = {}) {
 
   const body = document.createElement('div');
   body.className = 'chat-answer';
-  body.textContent = answer;
+  body.innerHTML = renderChatMarkdown(answer);
   message.append(body);
+
+  if (metadata.status !== 'llm') {
+    const errorNote = document.createElement('div');
+    errorNote.className = 'chat-error-note';
+    errorNote.textContent = chatFailureMessage(metadata.reason);
+    message.append(errorNote);
+  }
 
   const scope = document.createElement('div');
   scope.className = 'chat-evidence';
+  const trace = metadata.source_trace || {};
+  const tracedFields = Array.isArray(trace.fields_sent) ? trace.fields_sent : [];
   const company = question.match(/\bc\s*0?(\d{1,3})\b/i)?.[0]?.replace(/\s+/g, '').toUpperCase();
   const year = question.match(/\b20\d{2}\b/)?.[0];
   const fields = STATE.metrics.filter((key) => answer.includes(key) || answer.includes(METRICS[key]?.label || key));
-  scope.textContent = `Nguồn kiểm tra: ${STATE.sourceName}${fields.length ? ` · cột ${fields.join(', ')}` : ''}${company ? ` · mã được hỏi ${company}` : ''}${year ? ` · kỳ được hỏi ${year}` : ''}. Nội dung truy xuất cục bộ từ CSV; trường không nêu ở đây chưa được xác minh độc lập với báo cáo gốc.`;
+  scope.textContent = `Dữ liệu nguồn cho phân tích: ${trace.source_file || STATE.sourceName}${tracedFields.length ? ` · cột gửi ${tracedFields.join(', ')}` : fields.length ? ` · chỉ tiêu nhắc đến ${fields.join(', ')}` : ''}${company ? ` · mã được hỏi ${company}` : ''}${year ? ` · kỳ được hỏi ${year}` : ''}. Phần nhận xét là diễn giải AI trên dữ liệu đã chọn; CSV hiện có là bảng tổng hợp, chưa đối chiếu độc lập với báo cáo gốc.`;
   message.append(scope);
 
-  const trace = metadata.source_trace || {};
   const traceRecords = Array.isArray(trace.records) ? trace.records : [];
   const traceCompanies = [...new Set(traceRecords.map((record) => record.company_id).filter(Boolean))];
   const traceYears = [...new Set(traceRecords.map((record) => record.fiscal_year).filter(Boolean))];
@@ -1133,7 +1220,7 @@ function addChatResponse(question, answer, metadata = {}) {
     detail.append(status);
     detail.append(document.createTextNode(` · ${Number.isFinite(metadata.latency_ms) ? `${metadata.latency_ms} ms` : ''}${metadata.upstream_request_id ? ` · OpenAI request ${metadata.upstream_request_id}` : metadata.request_id ? ` · request ${metadata.request_id}` : ''}`));
   } else {
-    const reasonText = ({ missing_api_key: 'chưa cấu hình API key', missing_openai_dependency: 'chưa cài dependency backend', upstream_timeout: 'backend timeout', upstream_rate_limited: 'API giới hạn tần suất', upstream_error: 'API/backend lỗi', cross_origin_denied: 'request không cùng origin' })[metadata.reason] || 'backend chưa khả dụng';
+    const reasonText = ({ missing_api_key: 'chưa cấu hình API key', missing_openai_dependency: 'chưa cài dependency backend', upstream_timeout: 'hết thời gian chờ', upstream_rate_limited: 'API giới hạn tần suất', upstream_error: 'API/backend lỗi', upstream_unavailable: 'dịch vụ AI không khả dụng', authentication_failed: 'không xác thực được API key', unsupported_provider: 'nhà cung cấp chưa hỗ trợ', cross_origin_denied: 'backend từ chối kết nối', network_error: 'mất kết nối', empty_model_response: 'phản hồi rỗng', rate_limited: 'quá giới hạn lượt gọi', payload_too_large: 'yêu cầu quá lớn', invalid_data_context: 'dữ liệu chưa hợp lệ' })[metadata.reason] || 'backend chưa khả dụng';
     const status = document.createElement('span');
     status.className = 'chat-status-fallback';
     status.textContent = `Dự phòng cục bộ · ${reasonText}`;
@@ -1259,18 +1346,24 @@ function initInteractions() {
   $('#chatClose').addEventListener('click', () => setChatOpen(false));
   $('#chatForm').addEventListener('submit', (event) => {
     event.preventDefault();
+    if (STATE.chatSending) return;
     const input = $('#chatInput');
     const question = input.value.trim();
     if (!question) return;
+    STATE.chatSending = true;
+    const form = $('#chatForm');
+    const sendButton = form.querySelector('button[type="submit"]');
+    sendButton.disabled = true;
+    form.setAttribute('aria-busy', 'true');
     addChatMessage(question, 'user');
     input.value = '';
-    addChatMessage('Đang tra cứu dữ liệu…', 'system');
+    addChatMessage('Đang đối chiếu dữ liệu và xây dựng nhận xét…', 'system');
     const pending = $('#chatMessages').lastElementChild;
     window.setTimeout(async () => {
       let result;
       try { result = await getAssistantAnswer(question); }
       catch (error) { result = { answer: `Không thể hoàn tất tra cứu: ${error.message || 'Lỗi xử lý dữ liệu.'} Hãy thử câu hỏi khác hoặc kiểm tra CSV.`, metadata: { status: 'fallback', reason: 'local_error' } }; }
-      pending.remove();
+      finally { pending.remove(); STATE.chatSending = false; sendButton.disabled = false; form.removeAttribute('aria-busy'); }
       addChatResponse(question, result.answer, result.metadata);
       $('#chatMessages').scrollTop = $('#chatMessages').scrollHeight;
     }, 220);

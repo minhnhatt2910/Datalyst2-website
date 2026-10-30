@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0e2437">
+  <meta name="datalyst-api-base" content="">
   <title>Datalyst — Financial Intelligence</title>
-  <link rel="stylesheet" href="style.css">
-  <script src="app.js" defer></script>
+  <link rel="stylesheet" href="style.css?v=gold-20261030-1">
+  <script src="app.js?v=gold-20261030-1" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -208,7 +209,7 @@
           <div class="about-grid">
             <article class="panel"><span class="about-icon">⌕</span><h2>Không bịa số liệu</h2><p>Giá trị thiếu được giữ là “Chưa có dữ liệu phù hợp”. Ứng dụng không tạo doanh thu, tài sản hoặc tên/ngành doanh nghiệp chưa có trong tệp.</p></article>
             <article class="panel"><span class="about-icon">ƒ</span><h2>Phép tính có thể kiểm tra</h2><p>Trung vị nhóm được tính trên các giá trị cùng kỳ hiện có. Dự báo dùng hồi quy tuyến tính đơn giản, chỉ khi chuỗi đủ liên tục.</p></article>
-            <article class="panel"><span class="about-icon">✦</span><h2>Trợ lý thử nghiệm</h2><p>Datalyst AI diễn giải ngữ cảnh CSV qua backend. Khi backend hoặc API chưa sẵn sàng, phản hồi dự phòng cục bộ được ghi nhãn rõ ràng.</p></article>
+            <article class="panel"><span class="about-icon">✦</span><h2>Trợ lý phân tích AI</h2><p>Datalyst AI đối chiếu dữ liệu đã chọn, benchmark nhóm company-year và diễn giải các tín hiệu có bằng chứng qua backend. Khi backend hoặc API chưa sẵn sàng, phản hồi dự phòng cục bộ được ghi nhãn rõ ràng.</p></article>
           </div>
           <div class="footer-note">Datalyst Financial Intelligence · Phục vụ phân tích tham khảo, không phải tư vấn đầu tư, kế toán hoặc kiểm toán.</div>
         </section>
@@ -219,12 +220,12 @@
   <div class="sidebar-scrim" id="sidebarScrim"></div>
   <div class="chat-widget">
     <section class="chat-window hidden" id="chatWindow" aria-label="Trò chuyện với Datalyst AI" aria-hidden="true">
-      <header class="chat-header"><div class="chat-brand"><span class="chat-avatar">✦</span><div><strong>Datalyst AI</strong><small>Trợ lý dữ liệu · Bản thử nghiệm</small></div></div><button class="chat-close" id="chatClose" type="button" aria-label="Đóng cửa sổ chat">×</button></header>
-      <div class="chat-disclaimer">Khi backend kết nối, câu hỏi và các dòng/trường CSV liên quan được gửi tới OpenAI để tạo diễn giải. Đánh giá câu trả lời chỉ lưu trên trình duyệt này.</div>
+      <header class="chat-header"><div class="chat-brand"><span class="chat-avatar">✦</span><div><strong>Datalyst AI</strong><small>Trợ lý phân tích tài chính</small></div></div><button class="chat-close" id="chatClose" type="button" aria-label="Đóng cửa sổ chat">×</button></header>
+      <div class="chat-disclaimer">Khi backend AI được cấu hình, câu hỏi cùng các dòng/trường CSV liên quan được gửi tới dịch vụ đó để phân tích. Nhận xét dựa trên bộ dữ liệu giả lập, không phải tư vấn đầu tư. Đánh giá chỉ lưu trên trình duyệt này.</div>
       <div class="chat-disclaimer" id="chatConnectionStatus">Đang kiểm tra backend · phản hồi dự phòng cục bộ được ghi nhãn khi cần.</div>
       <div class="chat-messages" id="chatMessages" aria-live="polite"></div>
       <div class="chat-suggestions" id="chatSuggestions" aria-label="Câu hỏi gợi ý"></div>
-      <form class="chat-form" id="chatForm"><textarea id="chatInput" rows="1" aria-label="Nhập câu hỏi" placeholder="Hỏi về chỉ tiêu trong dữ liệu…"></textarea><button type="submit" aria-label="Gửi tin nhắn">➤</button></form>
+      <form class="chat-form" id="chatForm"><textarea id="chatInput" rows="1" aria-label="Nhập câu hỏi" placeholder="Hỏi để phân tích dữ liệu tài chính…"></textarea><button type="submit" aria-label="Gửi tin nhắn">➤</button></form>
     </section>
     <button class="chat-toggle" id="chatToggle" type="button" aria-label="Mở Datalyst AI" aria-expanded="false"><span class="chat-toggle-icon">✦</span><span class="chat-pulse"></span></button>
   </div>

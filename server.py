@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -29,8 +30,11 @@ except ImportError:  # A health endpoint and local fallback remain available bef
 
 
 ROOT = Path(__file__).resolve().parent
-MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5").strip() or "gpt-5.5"
-API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+PROVIDER = os.getenv("AI_PROVIDER", "openai").strip().lower() or "openai"
+MODEL = os.getenv("AI_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.5")).strip() or "gpt-5.5"
+API_KEY = os.getenv("AI_API_KEY", os.getenv("OPENAI_API_KEY", "")).strip()
+BASE_URL = os.getenv("AI_BASE_URL", "").strip() or None
+ALLOWED_ORIGINS = [origin.strip().rstrip("/") for origin in os.getenv("DATALYST_ALLOWED_ORIGINS", "").split(",") if origin.strip()]
 MAX_BODY_BYTES = 64_000
 RATE_LIMIT_REQUESTS = 20
 RATE_LIMIT_WINDOW_SECONDS = 60
@@ -38,7 +42,14 @@ ALLOWED_ASSETS = {"index.html", "style.css", "app.js", "logo.png", "submission_o
 logger = logging.getLogger("datalyst.api")
 
 app = FastAPI(title="Datalyst API", version="1.0.0", docs_url=None, redoc_url=None)
-_client = AsyncOpenAI(api_key=API_KEY, timeout=25.0, max_retries=0) if AsyncOpenAI and API_KEY else None
+if ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Accept", "Content-Type"],
+    )
+_client = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL, timeout=25.0, max_retries=0) if AsyncOpenAI and API_KEY and PROVIDER in {"openai", "openai-compatible"} else None
 _request_times: dict[str, deque[float]] = defaultdict(deque)
 
 
@@ -62,7 +73,9 @@ def _check_origin(request: Request) -> None:
     from urllib.parse import urlsplit
 
     parsed_origin = urlsplit(origin)
-    if parsed_origin.netloc.lower() != request.headers.get("host", "").lower() or parsed_origin.scheme.lower() != request.url.scheme.lower():
+    same_origin = parsed_origin.netloc.lower() == request.headers.get("host", "").lower() and parsed_origin.scheme.lower() == request.url.scheme.lower()
+    allowlisted_origin = origin.rstrip("/") in ALLOWED_ORIGINS
+    if not same_origin and not allowlisted_origin:
         raise HTTPException(status_code=403, detail={"code": "cross_origin_denied"})
 
 
@@ -88,14 +101,15 @@ async def reject_oversized_chat_body(request: Request, call_next):
 
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
-    key_available = bool(os.getenv("OPENAI_API_KEY", "").strip())
+    key_available = bool(API_KEY)
     sdk_available = AsyncOpenAI is not None
+    supported_provider = PROVIDER in {"openai", "openai-compatible"}
     return {
         "status": "ok",
-        "configured": key_available and sdk_available,
-        "provider": "openai",
+        "configured": key_available and sdk_available and supported_provider,
+        "provider": PROVIDER,
         "model": MODEL,
-        "reason": None if key_available and sdk_available else "missing_api_key" if not key_available else "missing_dependency",
+        "reason": None if key_available and sdk_available and supported_provider else "missing_api_key" if not key_available else "unsupported_provider" if not supported_provider else "missing_dependency",
     }
 
 
@@ -118,7 +132,8 @@ async def chat(payload: ChatRequest, request: Request) -> JSONResponse:
         raise HTTPException(status_code=413, detail={"code": "payload_too_large"})
     if _client is None:
         logger.info("chat status=unavailable request_id=%s model=%s latency_ms=0", request_id, MODEL)
-        raise HTTPException(status_code=503, detail={"code": "missing_api_key" if not API_KEY else "missing_openai_dependency", "request_id": request_id})
+        code = "missing_api_key" if not API_KEY else "unsupported_provider" if PROVIDER not in {"openai", "openai-compatible"} else "missing_openai_dependency"
+        raise HTTPException(status_code=503, detail={"code": code, "request_id": request_id})
 
     try:
         response = await _client.responses.create(
@@ -137,7 +152,7 @@ async def chat(payload: ChatRequest, request: Request) -> JSONResponse:
         return JSONResponse({
             "answer": answer,
             "source_trace": make_source_trace(context),
-            "provider": "openai",
+            "provider": PROVIDER,
             "model": actual_model,
             "request_id": request_id,
             "upstream_request_id": upstream_request_id,
@@ -152,9 +167,14 @@ async def chat(payload: ChatRequest, request: Request) -> JSONResponse:
     except RateLimitError:
         logger.info("chat status=upstream_rate_limited request_id=%s model=%s latency_ms=%s", request_id, MODEL, round((time.perf_counter() - started) * 1000))
         raise HTTPException(status_code=429, detail={"code": "upstream_rate_limited", "request_id": request_id}) from None
-    except (APIConnectionError, APIStatusError):
+    except APIStatusError as error:
+        status_code = getattr(error, "status_code", 0)
+        code = "authentication_failed" if status_code in {401, 403} else "upstream_rate_limited" if status_code == 429 else "upstream_unavailable" if status_code >= 500 else "upstream_error"
+        logger.info("chat status=%s request_id=%s model=%s latency_ms=%s", code, request_id, MODEL, round((time.perf_counter() - started) * 1000))
+        raise HTTPException(status_code=502, detail={"code": code, "request_id": request_id}) from None
+    except APIConnectionError:
         logger.info("chat status=upstream_error request_id=%s model=%s latency_ms=%s", request_id, MODEL, round((time.perf_counter() - started) * 1000))
-        raise HTTPException(status_code=502, detail={"code": "upstream_error", "request_id": request_id}) from None
+        raise HTTPException(status_code=502, detail={"code": "upstream_unavailable", "request_id": request_id}) from None
     except Exception:
         logger.info("chat status=internal_error request_id=%s model=%s latency_ms=%s", request_id, MODEL, round((time.perf_counter() - started) * 1000))
         raise HTTPException(status_code=500, detail={"code": "internal_error", "request_id": request_id}) from None

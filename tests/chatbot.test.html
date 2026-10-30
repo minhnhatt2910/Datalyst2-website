@@ -48,6 +48,11 @@ async function run() {
   assert('forecast is labeled as extrapolation', /hồi quy tuyến tính|ngoại suy/.test(app.answerChat('Dự báo biên lợi nhuận ròng của C001 năm tới là bao nhiêu?')));
   assert('ambiguous company is clarified', app.answerChat('Biên lợi nhuận ròng năm 2025 là bao nhiêu?').includes('thiếu mã doanh nghiệp'));
   assert('out of scope query gives the supported scope', app.answerChat('Thời tiết Hà Nội ngày mai thế nào?').includes('có thể truy vấn'));
+  const markdown = app.renderChatMarkdown('## Kết luận\nĐạt **8,2%**.\n- Ý một\n- Ý hai\n\n| Năm | Giá trị |\n| --- | ---: |\n| 2025 | 8,2% |');
+  assert('Markdown headings, bold, lists, and tables become formatted elements', /<h3>/.test(markdown) && /<strong>8,2%<\/strong>/.test(markdown) && /<ul>/.test(markdown) && /<table>/.test(markdown));
+  const hostileMarkdown = app.renderChatMarkdown('<img src=x onerror=alert(1)>');
+  const probe = app.document.createElement('div'); probe.innerHTML = hostileMarkdown;
+  assert('Markdown renderer escapes raw HTML rather than creating active elements', !probe.querySelector('img') && probe.textContent.includes('<img'));
 
   const originalFeedback = app.localStorage.getItem('datalyst_chat_feedback_v1');
   app.localStorage.removeItem('datalyst_chat_feedback_v1');
@@ -94,6 +99,9 @@ async function run() {
   assert('LLM context uses actual data and caps a company trend at five years', trendContext.records.length === 5 && trendContext.records.every((row) => row.company_id === 'C001') && new Set(trendContext.records.map((row) => row.fiscal_year)).size === 5);
   const groupContext = reloaded.buildChatDataContext('Hãy đánh giá tổng quan tình hình tài chính');
   assert('LLM group context uses one year and at most twelve actual rows', groupContext.records.length <= 12 && new Set(groupContext.records.map((row) => row.fiscal_year)).size <= 1);
+  assert('broad financial reviews send the available multi-signal metrics and risk labels', ['dso_days', 'inventory_days', 'debt_to_assets_pct', 'cfo_margin_pct', 'alert_tags'].every((field) => groupContext.fields_sent.includes(field)) && groupContext.derived_facts.length > 8);
+  const peerContext = reloaded.buildChatDataContext('Đánh giá C001 so với benchmark cùng ngành');
+  assert('company peer comparison sends its same-year Data Pack cohort with explicit scope', peerContext.scope.company_id === 'all' && peerContext.records.length === 12 && peerContext.records.some((row) => row.company_id === 'C001') && peerContext.scope.selection_note.includes('nhóm tham chiếu giả lập'));
   const netMeanFact = groupContext.derived_facts.find((fact) => fact.metric === 'net_margin_pct');
   const scopedNetMargins = groupContext.records.map((row) => row.net_margin_pct).filter(Number.isFinite);
   const expectedNetMean = reloaded.eval(`mean(${JSON.stringify(scopedNetMargins)})`);
@@ -118,6 +126,9 @@ async function run() {
   assert('chat fallback is explicitly labeled when API is unreachable', fallback.metadata.status === 'fallback' && fallback.metadata.reason === 'offline' && fallback.answer.includes('C001'));
   reloaded.addChatResponse('test', 'fallback', fallback.metadata);
   assert('chat card visibly marks fallback and source trace', reloaded.document.querySelector('.chat-trace .chat-status-fallback')?.textContent.includes('Dự phòng cục bộ') && reloaded.document.querySelector('.chat-trace')?.textContent.includes('submission_output.csv'));
+  assert('chat fallback explains unavailable AI in Vietnamese', reloaded.document.querySelector('.chat-error-note')?.textContent.includes('Backend AI chưa khả dụng'));
+  assert('answer labels AI wording as interpretation over selected CSV data', reloaded.document.querySelector('.chat-evidence')?.textContent.includes('diễn giải AI trên dữ liệu đã chọn'));
+  assert('chat answer font is increased to a readable size', parseFloat(getComputedStyle(reloaded.document.querySelector('.chat-answer')).fontSize) >= 16);
   if (originalFeedback === null) reloaded.localStorage.removeItem('datalyst_chat_feedback_v1');
   else reloaded.localStorage.setItem('datalyst_chat_feedback_v1', originalFeedback);
   const passed = checks.filter((check) => check.pass).length;

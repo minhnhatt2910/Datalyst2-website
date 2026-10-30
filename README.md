@@ -24,7 +24,7 @@ $env:OPENAI_MODEL = "gpt-5.5"
 python -m uvicorn server:app --host 127.0.0.1 --port 8000
 ```
 
-Open <http://127.0.0.1:8000>. The default model is `gpt-5.5`; `OPENAI_MODEL` can select another model available to the configured API account. Never paste the key into the website, chat, HTML, JavaScript, CSV, or Git. `/api/health` reports whether a key and SDK are configured, but never returns the key.
+Open <http://127.0.0.1:8000>. The default model is `gpt-5.5`; use `AI_MODEL` (or legacy `OPENAI_MODEL`) to select another model available to the configured API account. The server accepts `AI_API_KEY` (or legacy `OPENAI_API_KEY`), `AI_PROVIDER=openai`, and optionally `AI_BASE_URL` for an OpenAI-compatible API endpoint. These are backend environment variables; never place credentials in website files or Git. Other provider APIs need a provider-specific adapter in `server.py`. `/api/health` reports configuration state but does not verify that credentials are valid.
 
 Without a configured key or when the backend/API is unavailable, the chatbot uses the existing local rule-based answer and visibly labels the response **Dự phòng cục bộ**. It does not present local fallback as an LLM response. What-if calculations continue to work without an API key.
 
@@ -62,6 +62,9 @@ python -m unittest discover -s tests -v
 - The demo rate limiter is in-memory, per-process, and allows 20 chat requests per minute per client address. It is suitable only for a single-process local demo.
 - The local API is intended for `127.0.0.1`. Before public deployment, add user authentication, HTTPS, a durable rate limit and cost control, trusted proxy/origin configuration, and the organization's data-control review. Do not expose an unauthenticated demo server to the public internet.
 - Deploy the frontend and backend on the same origin. The server serves only the known application assets and CSV, not arbitrary repository files.
+- GitHub Pages serves static files only and cannot run this FastAPI backend. For a public site, deploy the API on a separate HTTPS backend host and set its secrets in the host environment. Either route `/api/*` through a same-origin reverse proxy, or set the `datalyst-api-base` meta tag in `index.html` to the backend origin and set `DATALYST_ALLOWED_ORIGINS` on the backend to the exact HTTPS website origin. For the direct cross-origin option, allow the configured origin in the backend and verify the health endpoint after deployment. Keep authentication and per-user rate limits on a public backend; the included in-memory limiter is only a local demo control.
+- Direct API example: set `<meta name="datalyst-api-base" content="https://api.example.com">` in the published `index.html`; on the API host set `DATALYST_ALLOWED_ORIGINS=https://your-site.example` and `AI_API_KEY` as a host secret. `AI_MODEL` and `AI_PROVIDER` are regular backend configuration variables. Do not put `AI_API_KEY` in the meta tag or any frontend file.
+- Chat queries send selected company-year rows and deterministic derived facts, not the full raw source statements. The current checked-in CSV is a summary dataset; interpretations and benchmarks must be labeled as based on that CSV/Data Pack cohort. No raw source statements or explicit industry metadata are present in this repository.
 - The API key must be injected as a server secret/environment variable by the host. Never commit secrets. `.gitignore` excludes `.env`, virtual environments, logs, and Python bytecode.
 
 ## Project layout

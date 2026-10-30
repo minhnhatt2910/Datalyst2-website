@@ -10,6 +10,13 @@ from datalyst_core import (
 
 
 class ContextTests(unittest.TestCase):
+    def test_financial_review_instructions_require_grounded_multi_signal_analysis(self):
+        prompt = build_instructions()
+        self.assertIn("không chỉ chép lại các giá trị", prompt)
+        self.assertIn("Đối chiếu company-year với nhóm cùng kỳ", prompt)
+        self.assertIn("Không gọi đây là benchmark toàn ngành/thị trường nếu context chỉ là nhóm Data Pack", prompt)
+        self.assertIn("Mỗi nhận xét dữ liệu phải nêu công ty, năm, metric/cột", prompt)
+
     def test_whitelists_fields_and_keeps_untrusted_csv_text_as_data(self):
         context = sanitize_context({
             "source_file": r"C:\\uploads\\my-data.csv",

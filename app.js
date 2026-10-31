@@ -52,7 +52,7 @@ const GROUP_MEAN_METRICS = new Set([
   'current_ratio_x', 'debt_to_assets_pct', 'cfo_margin_pct', 'cfo_to_net_income_x',
   'free_cash_flow_vnd_mn'
 ]);
-const STATE = { rows: [], headers: [], sourceName: 'submission_output.csv', metrics: [], page: 'dashboard', whatIfLog: [], showExtraKpis: false, filters: { dashboard: { company: 'all', year: 'all' }, analysis: { companies: ['C001'], year: 'all' }, comparison: { year: 'all' }, forecast: { company: 'all', year: 'all' }, whatIf: { company: 'all', year: 'all' }, alerts: { company: 'all', year: 'all' }, data: { company: 'all', year: 'all' } } };
+const STATE = { rows: [], headers: [], sourceName: 'submission_output.csv', metrics: [], pipelineExpanded: false, pipeline: { status: 'idle', stages: [], rawRows: 0, validRows: 0, malformedRows: 0, missingCells: 0, invalidNumeric: 0, duplicateKeys: 0, error: '' }, page: 'dashboard', whatIfLog: [], showExtraKpis: false, filters: { dashboard: { company: 'all', year: 'all' }, analysis: { companies: ['C001'], year: 'all' }, comparison: { year: 'all' }, forecast: { company: 'all', year: 'all' }, whatIf: { company: 'all', year: 'all' }, alerts: { company: 'all', year: 'all' }, data: { company: 'all', year: 'all' } } };
 const $ = (selector) => document.querySelector(selector);
 const apiUrl = (path) => {
   const base = $('meta[name="datalyst-api-base"]')?.content.trim().replace(/\/+$/, '') || '';
@@ -140,7 +140,13 @@ function parseCsv(text) {
     throw new Error('Thiếu trường bắt buộc company_id hoặc fiscal_year để nhận diện doanh nghiệp và kỳ báo cáo.');
   }
   if (!rows.length) throw new Error('Không tìm thấy bản ghi nào có đủ số cột.');
-  return { headers, rows, malformed };
+  const invalidIdentity = rows.filter((item) => !item.company_id.trim() || !/^\d{4}$/.test(item.fiscal_year.trim()));
+  if (invalidIdentity.length) throw new Error(`${invalidIdentity.length} dòng có company_id trống hoặc fiscal_year không phải năm 4 chữ số.`);
+  const pairs = rows.map((item) => `${item.company_id}|${item.fiscal_year}`);
+  const duplicatePairs = pairs.length - new Set(pairs).size;
+  const missingCells = rows.reduce((sum, item) => sum + headers.filter((header) => !item[header]).length, 0);
+  const invalidNumeric = rows.reduce((sum, item) => sum + headers.filter((header) => METRICS[header] && item[header] && getNumber(item, header) === null).length, 0);
+  return { headers, rows, malformed, rawRows: records.length - 1, missingCells, invalidNumeric, duplicatePairs };
 }
 
 function findNumericMetrics() {
@@ -153,19 +159,36 @@ function setError(message) {
   $('#loadError').classList.remove('hidden');
   $('#appContent').classList.add('hidden');
   $('#sidebarStatus').textContent = 'Không tải được dữ liệu';
+  STATE.pipeline = { ...STATE.pipeline, status: 'failed', error: message };
+  renderPipeline();
 }
 
 async function loadCsv(file) {
+  STATE.pipeline = { status: 'processing', stages: [
+    { label: 'Đọc CSV', status: 'running', detail: file?.name || 'submission_output.csv' },
+    { label: 'Kiểm tra cấu trúc và chất lượng', status: 'pending', detail: 'Chờ đọc tệp' },
+    { label: 'Ánh xạ chỉ tiêu', status: 'pending', detail: 'Chờ xác thực' },
+    { label: 'Tạo phân tích', status: 'pending', detail: 'Chờ ánh xạ' }
+  ], rawRows: 0, validRows: 0, metricsUsed: 0, malformedRows: 0, missingCells: 0, invalidNumeric: 0, duplicateKeys: 0, error: '' };
+  renderPipeline();
   try {
     const text = file ? await file.text() : await fetch('./submission_output.csv', { cache: 'no-store' }).then((response) => {
       if (!response.ok) throw new Error(`Không thể đọc submission_output.csv (HTTP ${response.status}). Hãy mở thư mục bằng VS Code Live Server.`);
       return response.text();
     });
+    STATE.pipeline.stages[0] = { label: 'Đọc CSV', status: 'done', detail: `${text.length.toLocaleString('vi-VN')} ký tự` };
+    STATE.pipeline.stages[1] = { label: 'Kiểm tra cấu trúc và chất lượng', status: 'running', detail: 'Đang kiểm tra cột, khóa và giá trị' };
+    renderPipeline();
     const parsed = parseCsv(text);
+    Object.assign(STATE.pipeline, { rawRows: parsed.rawRows, validRows: parsed.rows.length, malformedRows: parsed.malformed.length, missingCells: parsed.missingCells, invalidNumeric: parsed.invalidNumeric, duplicateKeys: parsed.duplicatePairs });
+    STATE.pipeline.stages[1] = { label: 'Kiểm tra cấu trúc và chất lượng', status: parsed.malformed.length || parsed.invalidNumeric || parsed.duplicatePairs ? 'warning' : 'done', detail: `${parsed.rows.length} dòng hợp lệ · ${parsed.malformed.length} dòng sai cấu trúc · ${parsed.missingCells} ô trống · ${parsed.invalidNumeric} giá trị số sai · ${parsed.duplicatePairs} khóa trùng` };
+    STATE.pipeline.stages[2] = { label: 'Ánh xạ chỉ tiêu', status: 'running', detail: 'Đang nhận diện các chỉ tiêu số có dữ liệu' };
     STATE.rows = parsed.rows;
     STATE.headers = parsed.headers;
     STATE.sourceName = file?.name || 'submission_output.csv';
     STATE.metrics = findNumericMetrics();
+    STATE.pipeline.metricsUsed = STATE.metrics.length;
+    STATE.pipeline.stages[2] = { label: 'Ánh xạ chỉ tiêu', status: 'done', detail: `${STATE.metrics.length} chỉ tiêu số dùng được` };
     const companies = sortedCompanies();
     const years = sortedYears();
     if (!companies.length || !years.length) throw new Error('Không có mã doanh nghiệp hoặc năm tài chính hợp lệ trong CSV.');
@@ -178,13 +201,42 @@ async function loadCsv(file) {
     $('#appContent').classList.remove('hidden');
     $('#sidebarStatus').textContent = `${STATE.rows.length} bản ghi đã nạp`;
     render();
+    STATE.pipeline.stages[3] = { label: 'Tạo phân tích', status: 'done', detail: `${STATE.rows.length} dòng hợp lệ được đưa vào biểu đồ, benchmark và các phân tích` };
+    STATE.pipeline.status = 'complete';
+    renderPipeline();
     if (parsed.malformed.length) {
       $('#loadError').textContent = `${parsed.malformed.length} dòng bị bỏ qua do số trường không khớp (dòng CSV: ${parsed.malformed.join(', ')}). Các dòng hợp lệ vẫn được hiển thị.`;
       $('#loadError').classList.remove('hidden');
     }
   } catch (error) {
-    setError(`Không thể nạp dữ liệu: ${error.message || 'Lỗi không xác định.'} Kiểm tra tên cột, định dạng CSV và chạy trang qua Live Server thay vì mở trực tiếp bằng file://.`);
+    const message = `Không thể nạp dữ liệu: ${error.message || 'Lỗi không xác định.'} Kiểm tra tên cột, định dạng CSV và chạy trang qua Live Server thay vì mở trực tiếp bằng file://.`;
+    const failedStage = STATE.pipeline.stages.find((stage) => stage.status === 'running') || STATE.pipeline.stages.find((stage) => stage.label === 'Tạo phân tích');
+    if (failedStage) { failedStage.status = 'failed'; failedStage.detail = error.message || 'Lỗi không xác định.'; }
+    STATE.pipeline.error = message;
+    setError(message);
   }
+}
+
+function renderPipeline() {
+  const root = $('#pipelineStatus');
+  if (!root) return;
+  const state = STATE.pipeline;
+  const label = state.status === 'processing' ? 'Đang xử lý' : state.status === 'complete' ? 'Hoàn thành' : state.status === 'failed' ? 'Thất bại' : 'Chưa bắt đầu';
+  const hasSummary = state.rawRows || state.validRows || state.metricsUsed;
+  const summary = state.status === 'failed'
+    ? `${state.validRows || 0} bản ghi đã nạp · ${state.metricsUsed || 0} chỉ tiêu sử dụng được · Có lỗi, xem chi tiết`
+    : hasSummary
+      ? `${state.validRows || 0} bản ghi đã nạp · ${state.metricsUsed || 0} chỉ tiêu sử dụng được · ${state.missingCells || 0} ô trống`
+      : state.status === 'processing' ? 'Đang đọc và kiểm tra tệp dữ liệu…' : 'Đang chờ tải dữ liệu.';
+  const statusIcon = state.status === 'complete' ? '✓' : state.status === 'failed' ? '!' : state.status === 'processing' ? '◌' : '○';
+  const expanded = STATE.pipelineExpanded;
+  const pipelineStats = `${state.rawRows || 0} dòng trong tệp · ${state.validRows || 0} dòng hợp lệ được sử dụng · ${state.malformedRows || 0} dòng sai cấu trúc bị bỏ qua · ${state.missingCells || 0} ô trống · ${state.invalidNumeric || 0} giá trị số sai định dạng · ${state.duplicateKeys || 0} khóa doanh nghiệp-năm trùng.`;
+  const detailSummary = state.status === 'failed'
+    ? `Nguyên nhân: ${state.error} ${pipelineStats}`
+    : state.status === 'complete' ? pipelineStats : 'Thống kê sẽ xuất hiện sau khi hoàn tất bước đọc và xác thực.';
+  const details = `<div class="pipeline-details"${expanded ? '' : ' hidden'}><p class="source-note">${escapeHtml(detailSummary)}</p><ol class="pipeline-steps">${state.stages.map((stage) => `<li class="pipeline-step ${escapeHtml(stage.status)}"><strong>${escapeHtml(stage.label)}</strong><span>${escapeHtml(stage.status === 'running' ? 'Đang xử lý · ' : '')}${escapeHtml(stage.detail)}</span></li>`).join('')}</ol></div>`;
+  root.classList.toggle('is-expanded', expanded);
+  root.innerHTML = `<div class="pipeline-compact"><div class="pipeline-title"><span class="eyebrow">PIPELINE DỮ LIỆU THỰC TẾ</span><span class="pipeline-state ${escapeHtml(state.status)}"><span aria-hidden="true">${statusIcon}</span> ${escapeHtml(label)}</span></div><p class="pipeline-summary">${escapeHtml(summary)}</p><button class="pipeline-toggle" id="pipelineToggle" type="button" aria-expanded="${expanded}" aria-controls="pipelineDetails">${expanded ? 'Thu gọn' : 'Xem chi tiết'}</button></div><div id="pipelineDetails">${details}</div>`;
 }
 
 function populateSelect(select, items, selected, labelFn = (item) => item) {
@@ -403,7 +455,7 @@ function renderDashboard() {
   kpis.push(kpiCard('Doanh nghiệp có dữ liệu', String(new Set(groupRows.map((row) => row.company_id)).size), `Trên ${groupRows.length} bản ghi tại kỳ ${latestYear ?? '—'}`, '▦', false));
   $('#kpiGrid').innerHTML = kpis.join('');
   $('#kpiGrid').classList.toggle('show-extra', STATE.showExtraKpis);
-  $('#scopeNote').textContent = `Phạm vi Dashboard: ${filters.company === 'all' ? 'tất cả doanh nghiệp' : filters.company} · ${filters.year === 'all' ? 'tất cả các năm' : `năm ${filters.year}`}. Biểu đồ tỷ lệ dùng trung vị theo kỳ; dữ liệu thiếu không được coi là 0.`;
+  $('#scopeNote').textContent = `Phạm vi Dashboard: ${filters.company === 'all' ? 'tất cả doanh nghiệp' : filters.company} · ${filters.year === 'all' ? 'tất cả các năm' : `năm ${filters.year}`}. Chỉ tiêu nhóm dùng bình quân cùng kỳ theo từng giá trị hợp lệ; dữ liệu thiếu không được coi là 0.`;
   const series = ['gross_margin_pct', 'operating_margin_pct', 'net_margin_pct'].filter((key) => STATE.metrics.includes(key)).map((key, index) => ({
     metric: key, name: METRICS[key].label, color: ['#168f86', '#6f91a6', '#d19543'][index],
     points: years.map((year) => {
@@ -416,7 +468,7 @@ function renderDashboard() {
   const row = selectedRow;
   const riskTags = riskTagsFor(row);
   const summary = [
-    `<div class="insight-item"><span class="insight-bullet">✓</span><span><strong>${escapeHtml(currentLabel)}</strong><br>${row ? `Mức phân loại nguồn: ${escapeHtml(severityLabel(row.predicted_severity))}; điểm rủi ro ${escapeHtml(metricDisplay('risk_score', getNumber(row, 'risk_score')))}.` : filters.company === 'all' ? `${currentRows.length} bản ghi trong kỳ; các tỷ lệ được trình bày bằng trung vị, không cộng gộp.` : 'Không có bản ghi cho kỳ đang chọn.'}</span></div>`,
+    `<div class="insight-item"><span class="insight-bullet">✓</span><span><strong>${escapeHtml(currentLabel)}</strong><br>${row ? `Mức phân loại nguồn: ${escapeHtml(severityLabel(row.predicted_severity))}; điểm rủi ro ${escapeHtml(metricDisplay('risk_score', getNumber(row, 'risk_score')))}.` : filters.company === 'all' ? `${currentRows.length} bản ghi trong kỳ; các tỷ lệ nhóm dùng bình quân giá trị hợp lệ cùng kỳ.` : 'Không có bản ghi cho kỳ đang chọn.'}</span></div>`,
     `<div class="insight-item"><span class="insight-bullet">↗</span><span><strong>Chỉ tiêu có thể phân tích</strong><br>${STATE.metrics.length} trường số được nhận diện; thiếu giá trị được giữ trống, không quy về 0.</span></div>`,
     `<div class="insight-item"><span class="insight-bullet">!</span><span><strong>Nhãn rủi ro do tệp cung cấp</strong><br>${riskTags.length ? riskTags.map((tag) => escapeHtml(TAG_LABELS[tag] || tag)).join(', ') : 'Không có nhãn rủi ro trong bản ghi được chọn.'}</span></div>`,
     `<div class="insight-item"><span class="insight-bullet">i</span><span><strong>Thiếu trường cơ bản</strong><br>Không có tên doanh nghiệp, ngành, doanh thu tuyệt đối hoặc báo cáo tài chính gốc.</span></div>`
@@ -637,6 +689,7 @@ function renderData() {
   const duplicatePairs = pairs.length - new Set(pairs).size;
   const missingColumns = STATE.headers.filter((header) => filteredRows.some((row) => !String(row[header] ?? '').trim()));
   const invalidYears = filteredRows.filter((row) => !Number.isInteger(Number(row.fiscal_year))).length;
+  const invalidNumeric = filteredRows.reduce((sum, row) => sum + STATE.headers.filter((header) => METRICS[header] && String(row[header] ?? '').trim() && getNumber(row, header) === null).length, 0);
   const numericKeys = STATE.metrics;
   const dataStats = [
     ['Tệp đang sử dụng', STATE.sourceName],
@@ -662,6 +715,7 @@ function renderData() {
     { ok: duplicatePairs === 0, text: duplicatePairs ? `Có ${duplicatePairs} khóa doanh nghiệp-năm bị trùng; lựa chọn kỳ có thể không duy nhất.` : 'Không có khóa company_id + fiscal_year bị trùng.' },
     { ok: missingColumns.length === 0, text: missingColumns.length ? `Có ô trống ở: ${missingColumns.join(', ')}. Ô trống không được coi là 0.` : 'Không phát hiện ô trống.' },
     { ok: invalidYears === 0, text: invalidYears ? `${invalidYears} dòng có năm tài chính không hợp lệ.` : 'Năm tài chính đọc được dưới dạng số.' },
+    { ok: invalidNumeric === 0, text: invalidNumeric ? `${invalidNumeric} giá trị ở các cột chỉ tiêu số không hợp lệ; không được dùng trong phép tính.` : 'Các giá trị số có nội dung đều chuyển đổi được; ô trống vẫn được giữ là thiếu dữ liệu.' },
     { ok: true, text: `${numericKeys.length} chỉ tiêu số được ánh xạ; hậu tố %, _x, _days và _vnd_mn xác định đơn vị.` },
     { ok: false, text: 'Trường evidence_fields nhắc đến balance_sheet.csv, income_statement.csv, cashflow.csv và financial_notes.csv; các tệp này không có trong thư mục nên không được xác minh.' }
   ];
@@ -1284,6 +1338,13 @@ function setChatOpen(open) {
 }
 
 function initInteractions() {
+  $('#pipelineStatus').addEventListener('click', (event) => {
+    const toggle = event.target.closest('#pipelineToggle');
+    if (!toggle) return;
+    STATE.pipelineExpanded = !STATE.pipelineExpanded;
+    renderPipeline();
+    $('#pipelineToggle')?.focus();
+  });
   [['dashboardCompany','dashboard','company',renderDashboard],['dashboardYear','dashboard','year',renderDashboard],['analysisYear','analysis','year',renderAnalysis],['comparisonYear','comparison','year',renderComparison],['forecastCompany','forecast','company',renderForecast],['forecastYear','forecast','year',renderForecast],['alertCompany','alerts','company',renderAlerts],['alertYear','alerts','year',renderAlerts],['dataCompany','data','company',renderData],['dataYear','data','year',renderData]].forEach(([id, screen, field, callback]) => $(`#${id}`).addEventListener('change', (event) => { STATE.filters[screen][field] = event.target.value; callback(); }));
   $('#analysisMetric').addEventListener('change', renderAnalysis);
   $('#analysisYear').addEventListener('change', renderAnalysis);

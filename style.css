@@ -415,6 +415,35 @@ th { font-size: 11.5px; }
 
 /* Larger centered logo, with the Vietnam date and time in the upper-left. */
 .sidebar { position: relative; }
+.pipeline-panel { margin: 12px 24px 0; padding: 10px 15px; }
+.pipeline-compact { display: grid; grid-template-columns: auto minmax(180px, 1fr) auto; align-items: center; gap: 12px 18px; }
+.pipeline-title { display: flex; align-items: center; gap: 12px; }
+.pipeline-title .eyebrow { white-space: nowrap; }
+.pipeline-summary { min-width: 0; margin: 0; color: #536974; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.pipeline-toggle { border: 1px solid #d7e2e5; border-radius: 8px; padding: 7px 11px; background: #f8fbfb; color: #28566a; font: inherit; font-size: 12px; font-weight: 650; white-space: nowrap; cursor: pointer; }
+.pipeline-toggle:hover { background: #edf5f5; }
+.pipeline-toggle:focus-visible { outline: 3px solid #74b7b0; outline-offset: 2px; }
+.pipeline-details { margin-top: 12px; padding-top: 10px; border-top: 1px solid #e8edef; }
+.pipeline-details[hidden] { display: none; }
+.pipeline-details .source-note { margin: 0; }
+.pipeline-state { border-radius: 999px; padding: 6px 11px; background: #edf2f4; color: #48606c; font-size: 12px; font-weight: 700; }
+.pipeline-state > span { display: inline-block; min-width: 12px; text-align: center; }
+.pipeline-state.processing { background: #fff4d6; color: #8a6413; }
+.pipeline-state.complete { background: #e4f4ed; color: #21734e; }
+.pipeline-state.failed { background: #fde9e7; color: #a33f37; }
+.pipeline-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 0; margin: 14px 0 0; list-style: none; }
+.pipeline-step { min-width: 0; border: 1px solid #e6ecee; border-radius: 10px; padding: 11px; }
+.pipeline-step strong, .pipeline-step span { display: block; }
+.pipeline-step strong { color: #263d49; font-size: 12px; }
+.pipeline-step span { margin-top: 5px; color: #70818a; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.pipeline-step.running { border-color: #e9cc7a; background: #fffaf0; }
+.pipeline-step.done { border-color: #c9e5d6; }
+.pipeline-step.warning { border-color: #e9cc7a; background: #fffaf0; }
+.pipeline-step.failed { border-color: #e8b7b2; background: #fff5f4; }
+@media (max-width: 800px) { .pipeline-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .pipeline-steps { grid-template-columns: 1fr; } }
+@media (max-width: 800px) { .pipeline-panel { margin: 10px 14px 0; } }
+@media (max-width: 620px) { .pipeline-compact { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; } .pipeline-title { grid-column: 1 / -1; justify-content: space-between; } .pipeline-summary { grid-column: 1; } .pipeline-toggle { grid-column: 2; grid-row: 2; } }
 .brand-logo { width: 264px; height: 118px; }
 .viet-clock { position: absolute; top: 39px; left: clamp(16px, 3vw, 42px); z-index: 1; margin: 0; transform: none; }
 @media (max-width: 800px) {
